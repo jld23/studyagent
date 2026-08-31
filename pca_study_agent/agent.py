@@ -1,10 +1,10 @@
-"""ADK Multi-Agent Orchestration & Strategic Model Routing.
+"""ADK Multi-Agent Orchestration & Strategic Model Routing with Real LLM Integration.
 
 Implements the Coordinator Multi-Agent Pattern using Google's Agent Development Kit (ADK):
 1. StudyCoordinatorAgent (Root Coordinator) - Routes candidate requests
 2. DiagnosticAssessmentAgent - Assembles and delivers multi-domain baseline tests
 3. AdaptiveDrillAgent - Drives adaptive spaced-repetition drills on weak domains
-4. SocraticArchitectTutorAgent - Deep-dive Principal Cloud Architect coach ('Pause & Learn')
+4. SocraticArchitectTutorAgent - Deep-dive Principal Cloud Architect coach ('Pause & Learn') with Gemini LLM
 5. ProgressAnalyticsAgent - Synthesizes domain mastery and exam readiness reports
 
 Implements Strategic Model Routing:
@@ -17,10 +17,15 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
+from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 
 from pca_study_agent.config import settings
+from pca_study_agent.knowledge.case_studies import PCA_CASE_STUDIES
+from pca_study_agent.knowledge.question_bank import PCA_FLASHCARDS, PCA_QUESTIONS
+from pca_study_agent.knowledge.retriever import retriever
+from pca_study_agent.memory.user_manager import user_manager
 from pca_study_agent.observability.guardrails import (
     self_eval_explanation,
     validate_input_safety,
@@ -68,29 +73,17 @@ SOCRATIC_TUTOR_CONSTITUTION = """
 You are a Senior Google Cloud Principal Architect and Socratic Tutor for the Professional Cloud Architect (PCA) exam.
 
 PEDAGOGICAL & ARCHITECTURAL DIRECTIVES:
-1. Socratic Deep-Dive: When a student asks "Why is this option correct?" or "Why is my answer wrong?", do not just give a simple answer. Deconstruct the architectural trade-offs:
-   - Identify the primary requirement (e.g. multi-region ACID consistency, RTO/RPO, least privilege, cost optimization).
-   - Compare the candidate's chosen service vs the optimal GCP service (e.g. Cloud Spanner vs Cloud SQL vs Bigtable; Dedicated Interconnect vs Cloud VPN; VPC Service Controls vs IAM).
-   - Explain why the distractor options fail to meet the scenario constraints.
-2. Architectural Diagrams: Use Mermaid diagrams (`mermaid ...`) whenever visualizing network topology, data pipelines, hybrid connectivity, or service interactions.
-3. Case Study Grounding: Explicitly reference the 4 official PCA Case Studies when relevant:
-   - Mountkirk Games (multiplayer gaming, Spanner, GKE Agones, Pub/Sub, BigQuery)
-   - TerramEarth (20M vehicles IoT telematics, cellular vs Wi-Fi batch, Dataflow, BigQuery)
-   - EHR Healthcare (HIPAA, Dedicated Interconnect, CMEK, VPC-SC, GKE Anthos)
-   - Helicopter Racing League (global video streaming, Cloud CDN, Cloud Storage, Serverless Cloud Run)
-4. Strategic Model: You operate with deep reasoning (gemini-pro) to deliver comprehensive, nuanced, and accurate architectural analysis.
+1. Socratic Deep-Dive & Direct Answers: When a candidate asks a question like "Why is service X chosen over service Y in that question?" or "Why did I get this wrong?", ALWAYS answer their specific question directly with detailed architectural reasoning:
+   - Identify the scenario constraints (e.g. multi-region write scalability, ACID transactions, RTO/RPO, sub-10ms latency, data residency).
+   - Compare the services directly (e.g. Cloud Spanner vs Cloud Bigtable vs Cloud SQL; Dedicated Interconnect vs Cloud VPN; VPC-SC vs IAM).
+   - Explain why the alternative/distractor fails to meet specific requirements (e.g. Bigtable is NoSQL wide-column without multi-table ACID transactions, while Spanner provides global relational ACID consistency with TrueTime).
+2. Architectural Diagrams: Provide clear Mermaid diagrams (````mermaid ... ````) illustrating data flow, network perimeters, or database topologies whenever relevant.
+3. Case Study Grounding: Reference the official PCA Case Studies (Mountkirk Games, TerramEarth, EHR Healthcare, Helicopter Racing League) when relevant.
+4. Tone & Style: Be authoritative, educational, concise, and structured. Always conclude with a brief key takeaway or offer to explain related topics.
 """
 
 DIAGNOSTIC_CONSTITUTION = """
-You are the PCA Diagnostic Assessment Specialist. Your role is to administer baseline assessments across all 6 PCA domains:
-Domain 1: Designing and planning a cloud solution architecture
-Domain 2: Managing and provisioning solution infrastructure
-Domain 3: Designing for security and compliance
-Domain 4: Analyzing and optimizing technical and business processes
-Domain 5: Managing implementation
-Domain 6: Ensuring solution and operations reliability
-
-Present scenario questions clearly, guide candidates to state their reasoning, and record responses accurately.
+You are the PCA Diagnostic Assessment Specialist. Your role is to administer baseline assessments across all 6 PCA domains.
 """
 
 DRILL_CONSTITUTION = """
@@ -126,13 +119,171 @@ class BaseStudyAgent:
 
 
 class SocraticArchitectTutorAgent(BaseStudyAgent):
-    """Deep-dive Socratic Cloud Architect Tutor (routed to Pro model)."""
+    """Deep-dive Socratic Cloud Architect Tutor (routed to Pro model with Gemini LLM)."""
 
     def __init__(self) -> None:
         super().__init__(
             name="SocraticArchitectTutorAgent",
             model_name=settings.gemini_pro_model,  # Pro model for deep reasoning
             constitution=SOCRATIC_TUTOR_CONSTITUTION,
+        )
+
+    def answer_inquiry(
+        self,
+        user_input: str,
+        active_question_id: Optional[str] = None,
+        retrieved_knowledge: Optional[List[Dict[str, Any]]] = None,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """Generate a grounded, deep-dive architectural explanation using Gemini LLM.
+
+        Args:
+            user_input: Candidate's question or discussion topic.
+            active_question_id: Currently active/paused question ID.
+            retrieved_knowledge: Grounded knowledge base chunks.
+            conversation_history: Recent conversation turns.
+
+        Returns:
+            str: Rich architectural explanation with trade-offs and diagrams.
+        """
+        # 1. Build context from active question
+        question_context = ""
+        active_q = None
+        if active_question_id:
+            active_q = next((q for q in PCA_QUESTIONS if q.id == active_question_id), None)
+            if active_q:
+                options_str = "\n".join([f"- Option {opt.key}: {opt.text}" for opt in active_q.options])
+                distractors_str = "\n".join([f"- Option {k}: {r}" for k, r in active_q.distractor_analysis.items()])
+                cs_str = f"Case Study: {active_q.case_study_id}\n" if active_q.case_study_id else ""
+                question_context = (
+                    f"ACTIVE EXAM QUESTION BEING DISCUSSED:\n"
+                    f"{cs_str}"
+                    f"Scenario: {active_q.question_text}\n"
+                    f"Options:\n{options_str}\n"
+                    f"Correct Option: {active_q.correct_option}\n"
+                    f"Architectural Principle: {active_q.architectural_principle}\n"
+                    f"Official Explanation: {active_q.explanation}\n"
+                    f"Distractor Analysis:\n{distractors_str}\n"
+                )
+
+        # 2. Build grounded knowledge snippets
+        kb_context = ""
+        if retrieved_knowledge:
+            kb_context = "GROUNDED KNOWLEDGE BASE CONTEXT:\n"
+            for item in retrieved_knowledge[:4]:
+                kb_context += f"- Title: {item.get('title')}\n  Snippet: {item.get('content_snippet')}\n"
+
+        # 3. Call Gemini LLM if API Key is configured
+        api_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        if api_key and not api_key.startswith("your_"):
+            try:
+                client = genai.Client(api_key=api_key)
+                system_instruction = (
+                    f"{self.constitution}\n\n"
+                    f"{question_context}\n\n"
+                    f"{kb_context}"
+                )
+                prompt = f"Candidate Question: {user_input}\n\nProvide a comprehensive, authoritative Socratic answer with trade-off analysis and a Mermaid diagram."
+
+                response = client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.2,
+                    ),
+                )
+                if response and response.text:
+                    return response.text
+            except Exception as exc:
+                logger.warning("Gemini LLM API call failed, falling back to grounded knowledge synthesis", error=str(exc))
+
+        # 4. Fallback: Context-aware grounded knowledge synthesis
+        return self._synthesize_grounded_fallback(user_input, active_q, retrieved_knowledge)
+
+    def _synthesize_grounded_fallback(
+        self,
+        user_input: str,
+        active_q: Optional[Any],
+        retrieved_knowledge: Optional[List[Dict[str, Any]]],
+    ) -> str:
+        """Intelligent grounded fallback when API key is unavailable."""
+        lower_q = user_input.lower()
+
+        # Specific Case: Spanner vs Bigtable
+        if ("spanner" in lower_q and "bigtable" in lower_q) or (active_q and active_q.id == "q_pca_001"):
+            return (
+                "### 🎓 Cloud Spanner vs. Cloud Bigtable: Architectural Trade-Off Analysis\n\n"
+                "In Mountkirk Games' scenario (and on the PCA exam), **Cloud Spanner is chosen over Cloud Bigtable** for player state and transactional data because of fundamental architectural differences:\n\n"
+                "| Requirement | Cloud Spanner | Cloud Bigtable |\n"
+                "| :--- | :--- | :--- |\n"
+                "| **Data Model** | Relational with SQL schema & secondary indexes | NoSQL Wide-Column (Key-Value/Column families) |\n"
+                "| **Transactions** | **Full ACID consistency across tables & regions** | Single-row ACID only (no multi-table transactions) |\n"
+                "| **Multi-Region Writes**| **Synchronous multi-region global replication (TrueTime)** | Eventual consistency across replicated clusters |\n"
+                "| **Primary Use Case** | Global multiplayer player profiles, financial balances, inventory | High-throughput time-series, IoT telematics, sensor streaming |\n\n"
+                "```mermaid\n"
+                "graph TD\n"
+                "    GameServers[GKE Game Servers] -->|ACID Transactions / Player State| Spanner[(Cloud Spanner Multi-Region)]\n"
+                "    GameServers -->|Streaming High-Throughput Telemetry| PubSub[Cloud Pub/Sub]\n"
+                "    PubSub --> Dataflow[Cloud Dataflow]\n"
+                "    Dataflow --> Bigtable[(Cloud Bigtable - Time Series)]\n"
+                "    Dataflow --> BigQuery[(BigQuery - Analytics)]\n"
+                "```\n\n"
+                "**Why Bigtable Fails the Requirement in this Scenario:**\n"
+                "- Bigtable does **not** support multi-row/multi-table relational transactions, structured SQL joins, or global synchronous consistency.\n"
+                "- Using Bigtable for transactional player accounts would require building a manual two-phase commit layer in application code, introducing race conditions and latency.\n\n"
+                "💡 **PCA Exam Rule of Thumb:**\n"
+                "- Need **Global Relational ACID SQL**? ➡️ **Cloud Spanner**\n"
+                "- Need **High-Throughput Time-Series / IoT (sub-10ms single row write)**? ➡️ **Cloud Bigtable**\n\n"
+                "*(Ask any follow-up question, or type `/resume` when ready to return to your drill)*"
+            )
+
+        # Specific Case: Shared VPC vs VPC Peering
+        if "shared vpc" in lower_q or "peering" in lower_q or (active_q and active_q.id == "q_pca_002"):
+            return (
+                "### 🎓 Shared VPC vs. VPC Network Peering: Architectural Comparison\n\n"
+                "**Shared VPC** is preferred for centralized enterprise governance across multiple projects:\n\n"
+                "1. **Centralized Administration:** A central Host Project allows Network Admins to manage subnets, firewall rules, and Dedicated Interconnects, while project teams manage their own VMs.\n"
+                "2. **No Full-Mesh Complexity:** VPC Peering is non-transitive. Interconnecting 15 projects with Peering requires $15 \\times 14 / 2 = 105$ peering connections and exceeds quota limits.\n\n"
+                "```mermaid\n"
+                "graph TD\n"
+                "    subgraph HostProject [Central Host Project]\n"
+                "        VPC[Shared VPC Network 10.0.0.0/16]\n"
+                "        SubnetA[Subnet US-Central 10.0.1.0/24]\n"
+                "        SubnetB[Subnet US-East 10.0.2.0/24]\n"
+                "        Interconnect[Dedicated Interconnect to On-Prem]\n"
+                "    end\n"
+                "    ServiceA[Service Project A: App Tier] --> SubnetA\n"
+                "    ServiceB[Service Project B: Data Tier] --> SubnetB\n"
+                "```\n\n"
+                "*(Type `/resume` to continue your adaptive drill)*"
+            )
+
+        # General Question Context Response
+        if active_q:
+            return (
+                f"### 🎓 Principal Architect Analysis on {active_q.architectural_principle}\n\n"
+                f"**Scenario Context:** {active_q.question_text}\n\n"
+                f"**Why Option {active_q.correct_option} is the Optimal Architecture:**\n"
+                f"{active_q.explanation}\n\n"
+                f"**Why Other Alternatives Fail:**\n"
+                + "\n".join([f"- **Option {k}:** {r}" for k, r in active_q.distractor_analysis.items()])
+                + "\n\n*(Ask a follow-up question or type `/resume` to return to the drill)*"
+            )
+
+        # Knowledge Base Grounded Response
+        kb_text = ""
+        if retrieved_knowledge:
+            kb_text = "\n\n**Relevant Architectural Documentation:**\n"
+            for r in retrieved_knowledge[:3]:
+                kb_text += f"- **{r.get('title')}:** {r.get('content_snippet')}\n"
+
+        return (
+            f"### 🎓 Google Cloud Principal Architect Tutor\n\n"
+            f"Regarding: *\"{user_input}\"*\n\n"
+            f"When designing systems on Google Cloud, architectural decisions are driven by the **Google Cloud Architecture Framework** pillars: System Design, Security, Reliability, Cost Optimization, and Operational Excellence.\n"
+            f"{kb_text}\n"
+            f"*(Ask any specific trade-off question, e.g., 'Compare Spanner vs Cloud SQL', or type `/resume` to return to your drill)*"
         )
 
 
@@ -142,7 +293,7 @@ class DiagnosticAssessmentAgent(BaseStudyAgent):
     def __init__(self) -> None:
         super().__init__(
             name="DiagnosticAssessmentAgent",
-            model_name=settings.gemini_flash_model,  # Flash for rapid quiz assembly
+            model_name=settings.gemini_flash_model,
             constitution=DIAGNOSTIC_CONSTITUTION,
         )
 
@@ -212,6 +363,8 @@ class StudyCoordinatorAgent(BaseStudyAgent):
 
             tool_calls: List[Dict[str, Any]] = []
             lower_input = user_input.lower().strip()
+            profile = user_manager.get_or_create_user(user_id)
+            active_drill = profile.active_drill
 
             # 2. Intent Routing & Command Handling
             if lower_input.startswith(("/start", "start assessment", "diagnostic", "take test")):
@@ -265,9 +418,6 @@ class StudyCoordinatorAgent(BaseStudyAgent):
                 clean_ans = user_input.replace("/submit", "").replace("answer:", "").replace("option", "").strip().upper()
                 if not clean_ans:
                     clean_ans = "A"
-                # Determine active item from user profile
-                from pca_study_agent.memory.user_manager import user_manager
-                profile = user_manager.get_or_create_user(user_id)
                 current_item_id = profile.active_drill.current_item_id if profile.active_drill else "q_pca_001"
 
                 res = evaluate_scenario_answer_and_update_mastery(
@@ -296,37 +446,28 @@ class StudyCoordinatorAgent(BaseStudyAgent):
                     f"💡 *Tip: Type `/pause` if you would like to discuss this question in depth with your Principal Architect tutor, or `/drill` for the next question.*"
                 )
 
-            elif lower_input.startswith(("/pause", "pause", "explain", "deep dive", "why")):
-                res = pause_assessment_session_for_deep_dive(user_id=user_id, topic_of_inquiry=user_input)
-                tool_calls.append({"tool": "pause_assessment_session_for_deep_dive", "result": res})
-                active_agent = self.tutor_agent.name
-                model_used = self.tutor_agent.model_name  # Pro model for tutor
+            elif lower_input.startswith(("/pause", "pause", "/explain", "deep dive")) or (active_drill and active_drill.is_paused_for_deep_dive) or lower_input.startswith(("why", "how", "what", "compare", "explain")):
+                # Socratic Tutor Deep-Dive Discussion
+                clean_inquiry = user_input.replace("/pause", "").replace("/explain", "").strip() or "PCA Architecture Overview"
+                pause_res = pause_assessment_session_for_deep_dive(user_id=user_id, topic_of_inquiry=clean_inquiry)
+                tool_calls.append({"tool": "pause_assessment_session_for_deep_dive", "result": pause_res})
 
-                # Ground with knowledge search
-                search_res = search_pca_knowledge_base(query=user_input)
+                active_agent = self.tutor_agent.name
+                model_used = self.tutor_agent.model_name
+
+                # Ground with knowledge base search
+                search_res = search_pca_knowledge_base(query=clean_inquiry)
                 tool_calls.append({"tool": "search_pca_knowledge_base", "result": search_res})
 
-                response_text = (
-                    f"### 🎓 Google Cloud Principal Architect Tutor (Deep-Dive Mode)\n\n"
-                    f"{res.get('message')}\n\n"
-                    f"**Architectural Deep-Dive Analysis:**\n\n"
-                    f"When designing solutions on Google Cloud for high availability and enterprise scale, "
-                    f"architectural decisions must balance **consistency, latency, fault tolerance, and operational overhead**.\n\n"
-                    f"```mermaid\n"
-                    f"graph TD\n"
-                    f"    Client[Global Clients] --> GCLB[Global External Load Balancer]\n"
-                    f"    GCLB --> Armor[Cloud Armor Security / WAF]\n"
-                    f"    Armor --> GKE[GKE Multi-Region Compute]\n"
-                    f"    GKE --> Spanner[(Cloud Spanner Multi-Region Global ACID)]\n"
-                    f"    GKE --> PubSub[Cloud Pub/Sub Streaming Buffer]\n"
-                    f"    PubSub --> Dataflow[Cloud Dataflow ETL]\n"
-                    f"    Dataflow --> BQ[(BigQuery Analytics Warehouse)]\n"
-                    f"```\n\n"
-                    f"**Key Architectural Principles:**\n"
-                    f"1. **Synchronous Multi-Region Consistency:** For transactional relational workloads requiring global writes without sharding, **Cloud Spanner** is the premier choice over Cloud SQL.\n"
-                    f"2. **Decoupled Asynchronous Streaming:** High-velocity IoT/telemetry ingestion uses **Pub/Sub + Dataflow** to prevent backend saturation.\n"
-                    f"3. **Zero-Trust & Data Defense:** Implement **VPC Service Controls** to eliminate exfiltration risks even if IAM credentials are stolen.\n\n"
-                    f"*(Ask any follow-up question, or type `/resume` when ready to return to your drill)*"
+                # Determine active question ID if in a drill
+                active_q_id = profile.active_drill.current_item_id if profile.active_drill else None
+
+                # Generate dynamic grounded response using Socratic Tutor
+                response_text = self.tutor_agent.answer_inquiry(
+                    user_input=clean_inquiry,
+                    active_question_id=active_q_id,
+                    retrieved_knowledge=search_res.get("results", []),
+                    conversation_history=[m.model_dump() for m in profile.messages[-6:]],
                 )
 
             elif lower_input.startswith(("/resume", "resume", "continue")):
@@ -384,26 +525,21 @@ class StudyCoordinatorAgent(BaseStudyAgent):
                     response_text = f"✅ {res.get('message')}"
 
             else:
-                # Default conversation & grounding search
+                # General conversation & grounding search
                 search_res = search_pca_knowledge_base(query=user_input)
                 tool_calls.append({"tool": "search_pca_knowledge_base", "result": search_res})
-                active_agent = self.name
-                model_used = self.model_name
-                response_text = (
-                    f"Hello! I am your Google Cloud Professional Cloud Architect study assistant. "
-                    f"Here is how I can help you prepare:\n\n"
-                    f"- 📝 **`/start`** — Take an initial diagnostic assessment across all 6 PCA domains.\n"
-                    f"- ⚡ **`/drill`** — Practice adaptive scenario questions and flashcards focused on your weak areas.\n"
-                    f"- 🎓 **`/pause`** — Pause to consult with your Principal Cloud Architect tutor for architectural trade-offs & diagrams.\n"
-                    f"- 📊 **`/report`** — View your certification domain mastery report and passing readiness.\n"
-                    f"- 🔄 **`/sync`** — Sync official Google Cloud syllabus materials.\n"
+                active_agent = self.tutor_agent.name
+                model_used = self.tutor_agent.model_name
+                response_text = self.tutor_agent.answer_inquiry(
+                    user_input=user_input,
+                    active_question_id=profile.active_drill.current_item_id if profile.active_drill else None,
+                    retrieved_knowledge=search_res.get("results", []),
                 )
 
             # 3. Output Guardrail & Quality Verification
             soundness = verify_architectural_soundness(response_text)
 
             # 4. Record to user persistent history
-            from pca_study_agent.memory.user_manager import user_manager
             user_manager.add_conversation_turn(
                 user_id=user_id,
                 user_message=user_input,

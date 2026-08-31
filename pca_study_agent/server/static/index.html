@@ -195,8 +195,8 @@
     }
     .option-item:hover { border-color: var(--google-blue); background: #f8faff; }
     .option-item.selected { border-color: var(--google-blue); background: #e8f0fe; font-weight: 500; }
-    .option-item.correct { border-color: var(--google-green); background: #e6f4ea; }
-    .option-item.incorrect { border-color: var(--google-red); background: #fce8e6; }
+    .option-item.correct { border-color: var(--google-green); background: #e6f4ea !important; }
+    .option-item.incorrect { border-color: var(--google-red); background: #fce8e6 !important; }
     .option-key {
       font-weight: 700;
       width: 24px;
@@ -212,6 +212,19 @@
     .option-item.selected .option-key { background: var(--google-blue); color: white; }
     .option-item.correct .option-key { background: var(--google-green); color: white; }
     .option-item.incorrect .option-key { background: var(--google-red); color: white; }
+
+    /* Auto-advance notification badge */
+    .auto-advance-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #e6f4ea;
+      color: var(--google-green);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
 
     /* Feedback Banner */
     .feedback-box {
@@ -252,7 +265,7 @@
     .chat-container {
       display: flex;
       flex-direction: column;
-      height: 500px;
+      height: 520px;
       border: 1px solid var(--border-color);
       border-radius: var(--radius-md);
       overflow: hidden;
@@ -267,11 +280,11 @@
       gap: 12px;
     }
     .chat-bubble {
-      max-width: 80%;
-      padding: 12px 16px;
+      max-width: 85%;
+      padding: 14px 18px;
       border-radius: var(--radius-md);
       font-size: 0.95rem;
-      line-height: 1.5;
+      line-height: 1.6;
     }
     .chat-bubble.user {
       align-self: flex-end;
@@ -285,6 +298,26 @@
       border: 1px solid var(--border-color);
       border-bottom-left-radius: 2px;
       box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .chat-bubble table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 0.875rem;
+    }
+    .chat-bubble th, .chat-bubble td {
+      border: 1px solid var(--border-color);
+      padding: 6px 10px;
+      text-align: left;
+    }
+    .chat-bubble th { background: #f1f3f4; font-weight: 600; }
+    .chat-bubble pre {
+      background: #202124;
+      color: #ffffff;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 10px 0;
     }
     .chat-input-bar {
       display: flex;
@@ -325,7 +358,7 @@
       <div>
         <div class="brand-title">Google Cloud PCA Study Agent</div>
       </div>
-      <span class="brand-badge">ADK Multi-Agent</span>
+      <span class="brand-badge">Gemini LLM & ADK</span>
     </div>
 
     <div class="user-pill">
@@ -363,8 +396,11 @@
 
         <div class="options-list" id="drillOptionsList"></div>
 
-        <div style="display: flex; gap: 10px; align-items: center;">
+        <div style="display: flex; gap: 10px; align-items: center; min-height: 42px;">
           <button class="btn btn-primary" id="drillSubmitBtn" onclick="submitCurrentAnswer()" disabled>Submit Answer</button>
+          <div id="autoAdvanceContainer" style="display:none;">
+            <span class="auto-advance-badge">✅ Correct! Advancing to next question...</span>
+          </div>
           <button class="btn btn-outline" id="drillNextBtn" onclick="loadNextDrillItem()" style="display:none;">Next Question ➡️</button>
         </div>
 
@@ -398,7 +434,7 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <div>
             <h2>🎓 Senior Google Cloud Principal Architect Tutor</h2>
-            <p style="color: var(--text-muted); font-size: 0.875rem;">
+            <p id="tutorSubheading" style="color: var(--text-muted); font-size: 0.875rem;">
               Deep-dive architectural discussions, trade-off comparisons, distractor deconstruction, and Mermaid diagrams.
             </p>
           </div>
@@ -408,7 +444,7 @@
         <div class="chat-container">
           <div class="chat-messages" id="chatMessages">
             <div class="chat-bubble agent">
-              <strong>Principal Architect:</strong> Welcome to Socratic deep-dive mode! Ask any architectural question, compare services (e.g. <em>"Why Cloud Spanner over Cloud SQL HA?"</em> or <em>"Explain VPC-SC in EHR Healthcare"</em>), or ask why a particular option is optimal.
+              <strong>Principal Architect:</strong> Welcome to Socratic deep-dive mode! Ask any question about Google Cloud architecture, service trade-offs (e.g. <em>"Why is Cloud Spanner preferred over Bigtable in that question?"</em>), or case study designs.
             </div>
           </div>
           <div class="chat-input-bar">
@@ -479,6 +515,7 @@
     let currentUserName = localStorage.getItem('pca_user_name') || 'Alex';
     let currentDrillItem = null;
     let selectedOption = null;
+    let autoAdvanceTimer = null;
 
     document.getElementById('userNameDisplay').textContent = currentUserName;
 
@@ -509,6 +546,7 @@
     }
 
     function showTab(tabName) {
+      if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
       document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
       document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
@@ -519,10 +557,12 @@
     }
 
     async function loadNextDrillItem() {
+      if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
       const feedback = document.getElementById('drillFeedback');
       feedback.className = 'feedback-box';
       feedback.style.display = 'none';
       document.getElementById('drillNextBtn').style.display = 'none';
+      document.getElementById('autoAdvanceContainer').style.display = 'none';
       document.getElementById('drillSubmitBtn').style.display = 'inline-flex';
       document.getElementById('drillSubmitBtn').disabled = true;
       selectedOption = null;
@@ -595,29 +635,38 @@
           }
         });
 
-        // Show feedback
-        const fb = document.getElementById('drillFeedback');
-        fb.className = `feedback-box show ${result.is_correct ? 'correct' : 'incorrect'}`;
-        document.getElementById('feedbackTitle').textContent = result.is_correct ? '✅ Correct Choice!' : '❌ Suboptimal Choice';
-        document.getElementById('feedbackPrinciple').textContent = 'Architectural Principle: ' + result.architectural_principle;
-        document.getElementById('feedbackExplanation').textContent = result.explanation;
-
-        const distList = document.getElementById('distractorList');
-        distList.innerHTML = '';
-        if (result.distractor_analysis) {
-          for (const [k, reason] of Object.entries(result.distractor_analysis)) {
-            distList.innerHTML += `<div><strong>Option ${k}:</strong> ${reason}</div>`;
-          }
-        }
-
         document.getElementById('drillSubmitBtn').style.display = 'none';
-        document.getElementById('drillNextBtn').style.display = 'inline-flex';
+
+        if (result.is_correct) {
+          // Auto-advance on correct answer without waiting!
+          document.getElementById('autoAdvanceContainer').style.display = 'inline-flex';
+          autoAdvanceTimer = setTimeout(() => {
+            loadNextDrillItem();
+          }, 1200);
+        } else {
+          // If incorrect, show detailed feedback and allow manual Next or Pause
+          const fb = document.getElementById('drillFeedback');
+          fb.className = 'feedback-box show incorrect';
+          document.getElementById('feedbackTitle').textContent = '❌ Suboptimal Choice';
+          document.getElementById('feedbackPrinciple').textContent = 'Architectural Principle: ' + result.architectural_principle;
+          document.getElementById('feedbackExplanation').textContent = result.explanation;
+
+          const distList = document.getElementById('distractorList');
+          distList.innerHTML = '';
+          if (result.distractor_analysis) {
+            for (const [k, reason] of Object.entries(result.distractor_analysis)) {
+              distList.innerHTML += `<div><strong>Option ${k}:</strong> ${reason}</div>`;
+            }
+          }
+          document.getElementById('drillNextBtn').style.display = 'inline-flex';
+        }
       } catch (err) {
         console.error("Failed to submit answer:", err);
       }
     }
 
     async function pauseForDeepDive() {
+      if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
       try {
         await fetch('/api/v1/drill/pause', {
           method: 'POST',
@@ -628,7 +677,10 @@
           })
         });
         showTabDirect('deepdive');
-        appendChatMessage("agent", `Paused the active drill on question *${currentDrillItem ? currentDrillItem.item_id : ''}*. What aspect of this Google Cloud architecture would you like to explore?`);
+        
+        const qTitle = currentDrillItem ? (currentDrillItem.content.question_text || '') : '';
+        document.getElementById('tutorSubheading').innerHTML = `Paused on <strong>${currentDrillItem ? currentDrillItem.item_id : 'current question'}</strong>: <em>${qTitle.slice(0, 90)}...</em>`;
+        appendChatMessage("agent", `Paused the active drill on question **${currentDrillItem ? currentDrillItem.item_id : ''}**.\n\nWhat aspect of this Google Cloud architecture would you like to explore? (e.g. *Why is Cloud Spanner preferred over Bigtable in this scenario?*)`);
       } catch (err) {
         console.error("Pause failed:", err);
       }
@@ -642,12 +694,14 @@
           body: JSON.stringify({ user_id: currentUserId })
         });
         showTabDirect('drill');
+        loadNextDrillItem();
       } catch (err) {
         console.error("Resume failed:", err);
       }
     }
 
     function showTabDirect(tabName) {
+      if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
       document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
       document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
       document.getElementById(tabName + 'Tab').style.display = 'block';
@@ -681,7 +735,11 @@
       bubble.innerHTML = marked.parse(text);
       container.appendChild(bubble);
       container.scrollTop = container.scrollHeight;
-      mermaid.run({ nodes: bubble.querySelectorAll('.language-mermaid, .mermaid') });
+      try {
+        mermaid.run({ nodes: bubble.querySelectorAll('.language-mermaid, .mermaid') });
+      } catch(e) {
+        console.log("Mermaid parse note:", e);
+      }
     }
 
     async function loadProgressReport() {
