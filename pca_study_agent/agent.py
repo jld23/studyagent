@@ -231,30 +231,40 @@ class SocraticArchitectTutorAgent(BaseStudyAgent):
         # 3. Call Gemini LLM client if configured
         client = get_genai_client()
         if client:
-            try:
-                system_instruction = (
-                    f"{self.constitution}\n\n"
-                    f"{question_context}\n\n"
-                    f"{kb_context}"
-                )
-                prompt = (
-                    f"Candidate Question: {user_input}\n\n"
-                    f"Please answer the candidate's question thoroughly and directly. Include concrete architectural principles, "
-                    f"Google Cloud service trade-offs, and a Mermaid diagram (```mermaid ... ```) where appropriate."
-                )
+            candidate_models = [self.model_name]
+            for fallback_model in ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro"]:
+                if fallback_model not in candidate_models:
+                    candidate_models.append(fallback_model)
 
-                response = client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                    config=genai_types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        temperature=0.3,
-                    ),
-                )
-                if response and response.text:
-                    return response.text
-            except Exception as exc:
-                logger.warning("Gemini LLM API call failed", error=str(exc))
+            for model_to_try in candidate_models:
+                try:
+                    system_instruction = (
+                        f"{self.constitution}\n\n"
+                        f"{question_context}\n\n"
+                        f"{kb_context}"
+                    )
+                    prompt = (
+                        f"Candidate Question: {user_input}\n\n"
+                        f"Please answer the candidate's question thoroughly and directly. Include concrete architectural principles, "
+                        f"Google Cloud service trade-offs, and a Mermaid diagram (```mermaid ... ```) where appropriate."
+                    )
+
+                    response = client.models.generate_content(
+                        model=model_to_try,
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            temperature=0.3,
+                        ),
+                    )
+                    if response and response.text:
+                        return response.text
+                except Exception as exc:
+                    logger.warning(
+                        "Gemini LLM API call failed with model, trying next fallback",
+                        attempted_model=model_to_try,
+                        error=str(exc),
+                    )
 
         # 4. Fallback when credentials are missing or unavailable
         return self._synthesize_offline_response(user_input, active_q, retrieved_knowledge)

@@ -153,7 +153,12 @@ def test_dynamic_genai_client_unconfigured_fallback(monkeypatch):
 
     monkeypatch.setattr(settings, "gemini_api_key", None)
     monkeypatch.setattr(settings, "gcp_project_id", None)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
 
     client = get_genai_client()
     assert client is None
+
 
