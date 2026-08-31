@@ -9,9 +9,10 @@ from pca_study_agent.observability.logger import (
 from pca_study_agent.observability.pii_scrubber import redact_pii_text, redact_pii_data
 from pca_study_agent.observability.telemetry import tracer, trace_span, get_current_trace_id
 from pca_study_agent.observability.guardrails import (
-    validate_input_safety,
-    verify_architectural_soundness,
     self_eval_explanation,
+    validate_input_safety,
+    validate_output_safety,
+    verify_architectural_soundness,
 )
 from pca_study_agent.observability.hitl import hitl_manager
 
@@ -26,6 +27,7 @@ __all__ = [
     "trace_span",
     "get_current_trace_id",
     "validate_input_safety",
+    "validate_output_safety",
     "verify_architectural_soundness",
     "self_eval_explanation",
     "hitl_manager",

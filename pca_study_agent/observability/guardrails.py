@@ -10,13 +10,71 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Tuple
 
-# Disallowed prompt injection or exfiltration keywords
+# Disallowed prompt injection, jailbreak, and system exfiltration keywords
 INJECTION_PATTERNS = [
-    r"ignore\s+(all\s+)?previous\s+instructions",
+    r"ignore\s+(all\s+)?(previous\s+)?(instructions|guidelines|rules|prompts)",
     r"system\s+prompt\s+override",
-    r"reveal\s+internal\s+prompts",
+    r"reveal\s+(internal|system|hidden)\s+(prompts|instructions|constitution)",
     r"bypass\s+safety\s+filter",
+    r"\b(dan|jailbreak)\b",
+    r"roleplay\s+as\s+(an\s+)?unrestricted",
+    r"what\s+(is|are)\s+your\s+(exact\s+)?(system\s+prompt|instructions|constitution)",
+    r"(print|show|output|repeat|dump|leak)\s+(your\s+)?(initial\s+|system\s+)?(prompt|instructions|constitution)",
+    r"developer\s+mode\s+output",
+    r"act\s+as\s+an\s+unfiltered",
+    r"disregard\s+(all\s+)?(previous\s+)?(instructions|guidelines|rules)",
 ]
+
+# Patterns that detect system instruction leakage or credential exfiltration in LLM outputs
+EXFILTRATION_PATTERNS = [
+    r"COORDINATOR_CONSTITUTION",
+    r"SOCRATIC_TUTOR_CONSTITUTION",
+    r"DIAGNOSTIC_CONSTITUTION",
+    r"You are the Google Cloud PCA Study Coordinator",
+    r"CONSTITUTION & OPERATIONAL PRINCIPLES",
+    r"GEMINI_API_KEY\s*=\s*['\"]?[a-zA-Z0-9_\-]{10,}",
+    r"AIza[0-9A-Za-z-_]{30,40}",
+    r"(?:BEGIN|END)\s+(?:PRIVATE\s+KEY|CERTIFICATE|RSA\s+PRIVATE\s+KEY)",
+]
+
+
+def validate_input_safety(prompt: str) -> Tuple[bool, str]:
+    """Validate user prompt against adversarial injections, jailbreaks, and policy violations.
+
+    Args:
+        prompt (str): Raw candidate input prompt.
+
+    Returns:
+        Tuple[bool, str]: (is_safe, failure_reason)
+    """
+    for pattern in INJECTION_PATTERNS:
+        if re.search(pattern, prompt, re.IGNORECASE):
+            return False, "Input rejected by safety policy: adversarial prompt injection or jailbreak pattern detected."
+    return True, "Input is safe."
+
+
+def validate_output_safety(response_text: str) -> Tuple[bool, str]:
+    """Validate generated LLM output to prevent system prompt leakage or credential exfiltration.
+
+    Args:
+        response_text (str): Generated response text from LLM.
+
+    Returns:
+        Tuple[bool, str]: (is_safe, sanitized_or_original_text)
+    """
+    if not isinstance(response_text, str):
+        return True, response_text
+
+    for pattern in EXFILTRATION_PATTERNS:
+        if re.search(pattern, response_text, re.IGNORECASE):
+            return (
+                False,
+                "### 🎓 Google Cloud PCA Study Agent\n\n"
+                "I am specialized exclusively in Google Cloud Professional Cloud Architect (PCA) preparation. "
+                "Please ask a Google Cloud architecture question or type `/resume` to continue your drill.",
+            )
+
+    return True, response_text
 
 # Google Cloud architectural facts and canonical mappings
 KNOWN_GCP_SERVICES = {

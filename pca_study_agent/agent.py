@@ -29,6 +29,7 @@ from pca_study_agent.memory.user_manager import user_manager
 from pca_study_agent.observability.guardrails import (
     self_eval_explanation,
     validate_input_safety,
+    validate_output_safety,
     verify_architectural_soundness,
 )
 from pca_study_agent.observability.logger import logger
@@ -259,7 +260,8 @@ class SocraticArchitectTutorAgent(BaseStudyAgent):
                         ),
                     )
                     if response and response.text:
-                        return response.text
+                        _, safe_output = validate_output_safety(response.text)
+                        return safe_output
                 except Exception as exc:
                     logger.warning(
                         "Gemini LLM API call failed with model, trying next fallback",
@@ -576,6 +578,7 @@ class StudyCoordinatorAgent(BaseStudyAgent):
                 )
 
             # 3. Output Guardrail & Quality Verification
+            _, response_text = validate_output_safety(response_text)
             soundness = verify_architectural_soundness(response_text)
 
             # 4. Record to user persistent history
