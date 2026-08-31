@@ -1,7 +1,8 @@
 """Configuration and Secure Secret Management for PCA Study Agent.
 
-Ensures zero hardcoded credentials and supports secure injection via
-Google Cloud Secret Manager, runtime environment variables, or .env files.
+Ensures zero hardcoded credentials and dynamically supports both:
+1. Google AI Mode (API Key from Google AI Studio / Gemini API)
+2. Vertex AI Mode (Application Default Credentials / ADC with GCP_PROJECT_ID)
 """
 
 from __future__ import annotations
@@ -53,12 +54,23 @@ class Settings(BaseModel):
     gemini_flash_model: str = Field(default_factory=lambda: os.getenv("GEMINI_FLASH_MODEL", "gemini-3.7-flash"))
     gemini_pro_model: str = Field(default_factory=lambda: os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro"))
 
-    # Google Cloud settings
-    google_cloud_project: Optional[str] = Field(default_factory=lambda: os.getenv("GOOGLE_CLOUD_PROJECT"))
-    google_cloud_location: str = Field(default_factory=lambda: os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"))
-    use_vertex_ai: bool = Field(
-        default_factory=lambda: os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() in ("true", "1", "yes")
+    # Google Cloud / Vertex AI settings
+    gcp_project_id: Optional[str] = Field(
+        default_factory=lambda: os.getenv("GCP_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT")
     )
+    gcp_location: str = Field(
+        default_factory=lambda: os.getenv("GCP_LOCATION") or os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+    )
+
+    # Legacy / alias properties for backward compatibility
+    @property
+    def google_cloud_project(self) -> Optional[str]:
+        return self.gcp_project_id
+
+    @property
+    def google_cloud_location(self) -> str:
+        return self.gcp_location
+
     use_gcp_secret_manager: bool = Field(
         default_factory=lambda: os.getenv("USE_GCP_SECRET_MANAGER", "false").lower() in ("true", "1", "yes")
     )
@@ -89,12 +101,12 @@ class Settings(BaseModel):
 
     def resolve_secrets(self) -> None:
         """Resolve API keys and credentials from Secret Manager if enabled."""
-        if self.use_gcp_secret_manager and self.google_cloud_project:
+        if self.use_gcp_secret_manager and self.gcp_project_id:
             try:
                 from google.cloud import secretmanager  # type: ignore
 
                 client = secretmanager.SecretManagerServiceClient()
-                secret_path = f"projects/{self.google_cloud_project}/secrets/{self.secret_manager_key_name}/versions/latest"
+                secret_path = f"projects/{self.gcp_project_id}/secrets/{self.secret_manager_key_name}/versions/latest"
                 response = client.access_secret_version(request={"name": secret_path})
                 secret_payload = response.payload.data.decode("UTF-8").strip()
                 if secret_payload:

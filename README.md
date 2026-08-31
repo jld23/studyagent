@@ -101,26 +101,31 @@ uv sync --extra dev
 
 ### 2. Environment Configuration
 
-Copy the template and supply your Gemini API key:
-
+Copy the template:
 ```bash
 cp .env.template .env
 ```
 
-Edit `.env`:
+Configure **either** Option A or Option B in `.env`:
+
+#### Option A: Google AI Mode (Google AI Studio / Gemini API Key)
+Ideal for standard developers and local testing with a Gemini API key:
 ```ini
-# Gemini API Configuration
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_FLASH_MODEL=gemini-3.7-flash
 GEMINI_PRO_MODEL=gemini-2.5-pro
-
-# Server Settings
-HOST=0.0.0.0
-PORT=8000
-ENVIRONMENT=development
 ```
 
-*(Note: The agent also includes a complete offline grounded architectural synthesis engine, allowing you to run drills and trade-off explanations even without an active API key).*
+#### Option B: Vertex AI Mode (GCP Project / ADC / Argolis)
+Ideal for Google engineers, FDEs, and enterprise deployments using Application Default Credentials (`gcloud auth application-default login`):
+```ini
+GCP_PROJECT_ID=your-gcp-project-id
+GCP_LOCATION=us-central1
+GEMINI_FLASH_MODEL=gemini-3.7-flash
+GEMINI_PRO_MODEL=gemini-2.5-pro
+```
+
+*(Note: If neither is configured, the agent runs in offline knowledge mode, using its built-in knowledge base for drills and displaying a clear setup banner in tutor mode).*
 
 ---
 

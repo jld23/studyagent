@@ -1,15 +1,15 @@
-"""ADK Multi-Agent Orchestration & Strategic Model Routing with Real LLM Integration.
+"""ADK Multi-Agent Orchestration & Strategic Model Routing with Dynamic LLM Client.
 
 Implements the Coordinator Multi-Agent Pattern using Google's Agent Development Kit (ADK):
 1. StudyCoordinatorAgent (Root Coordinator) - Routes candidate requests
 2. DiagnosticAssessmentAgent - Assembles and delivers multi-domain baseline tests
 3. AdaptiveDrillAgent - Drives adaptive spaced-repetition drills on weak domains
-4. SocraticArchitectTutorAgent - Deep-dive Principal Cloud Architect coach ('Pause & Learn') with Gemini LLM
+4. SocraticArchitectTutorAgent - Deep-dive Principal Cloud Architect coach ('Pause & Learn')
 5. ProgressAnalyticsAgent - Synthesizes domain mastery and exam readiness reports
 
-Implements Strategic Model Routing:
-- Flash Model (gemini-3.7-flash) for rapid quiz delivery, scoring, and UI flows.
-- Pro Model (gemini-2.5-pro) for deep-dive architectural trade-offs and complex reasoning.
+Dynamically supports both:
+- Google AI Mode (API Key from Google AI Studio) via `GEMINI_API_KEY`
+- Vertex AI Mode (Application Default Credentials / ADC) via `GCP_PROJECT_ID` & `GCP_LOCATION`
 """
 
 from __future__ import annotations
@@ -96,26 +96,58 @@ You are the PCA Progress & Analytics Specialist. You analyze candidate test hist
 
 
 def get_genai_client() -> Optional[genai.Client]:
-    """Helper to initialize a genai.Client with API key or Vertex AI fallback."""
+    """Dynamically initialize the GenAI client in Google AI or Vertex AI mode.
+
+    Priority Order:
+    1. Google AI Mode: If `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is set, initialize with API key.
+    2. Vertex AI Mode: If `GEMINI_API_KEY` is not set but `GCP_PROJECT_ID` (or `GOOGLE_CLOUD_PROJECT`)
+       is set, initialize in Vertex AI mode with ADC targeting `GCP_PROJECT_ID` and `GCP_LOCATION`.
+    3. Unconfigured: If neither is present, return None and log guidance.
+
+    Returns:
+        Optional[genai.Client]: Initialized GenAI client instance or None.
+    """
+    # 1. Google AI Mode (API Key from Google AI Studio / Gemini API)
     api_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if api_key and not api_key.startswith("your_") and len(api_key.strip()) > 10:
         try:
-            return genai.Client(api_key=api_key.strip())
+            client = genai.Client(api_key=api_key.strip())
+            logger.info("Initialized GenAI client in Google AI Studio mode (API Key)")
+            return client
         except Exception as e:
-            logger.warning("Failed to initialize genai.Client with API key", error=str(e))
+            logger.warning("Failed to initialize GenAI client in Google AI mode", error=str(e))
 
-    if settings.use_vertex_ai or os.getenv("GOOGLE_GENAI_USE_VERTEXAI"):
-        project = settings.google_cloud_project or os.getenv("GOOGLE_CLOUD_PROJECT")
-        location = settings.google_cloud_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+    # 2. Vertex AI Mode (Application Default Credentials / ADC with GCP_PROJECT_ID)
+    gcp_project = settings.gcp_project_id or os.getenv("GCP_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT")
+    gcp_location = (
+        settings.gcp_location or os.getenv("GCP_LOCATION") or os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+    )
+
+    if gcp_project and not gcp_project.startswith("your_") and len(gcp_project.strip()) > 3:
         try:
-            return genai.Client(vertexai=True, project=project, location=location)
+            client = genai.Client(vertexai=True, project=gcp_project.strip(), location=gcp_location.strip())
+            logger.info(
+                "Initialized GenAI client in Vertex AI mode with ADC",
+                project=gcp_project,
+                location=gcp_location,
+            )
+            return client
         except Exception as e:
-            logger.warning("Failed to initialize genai.Client with Vertex AI", error=str(e))
+            logger.warning(
+                "Failed to initialize GenAI client in Vertex AI mode",
+                project=gcp_project,
+                location=gcp_location,
+                error=str(e),
+            )
 
-    try:
-        return genai.Client()
-    except Exception:
-        return None
+    # 3. Unconfigured / Missing Credentials Warning
+    logger.warning(
+        "No GenAI credentials configured. Running in offline knowledge mode. "
+        "To enable live Gemini LLM reasoning: "
+        "(1) Set GEMINI_API_KEY in .env for Google AI mode, OR "
+        "(2) Set GCP_PROJECT_ID (and optional GCP_LOCATION) in .env for Vertex AI mode with ADC."
+    )
+    return None
 
 
 # ============================================================================
@@ -224,7 +256,7 @@ class SocraticArchitectTutorAgent(BaseStudyAgent):
             except Exception as exc:
                 logger.warning("Gemini LLM API call failed", error=str(exc))
 
-        # 4. Fallback when API Key is missing or unavailable
+        # 4. Fallback when credentials are missing or unavailable
         return self._synthesize_offline_response(user_input, active_q, retrieved_knowledge)
 
     def _synthesize_offline_response(
@@ -265,10 +297,9 @@ class SocraticArchitectTutorAgent(BaseStudyAgent):
                 "| **Write Latency** | **Sub-10ms (optimized for high writes)** | ~10-20ms (TrueTime consensus) |\n"
                 "| **Primary Use** | IoT, Time-Series, Feature Store | Financial Ledger, Inventory, User Auth |\n\n"
                 "> [!NOTE]\n"
-                "> **To enable fully dynamic LLM answers for arbitrary free-form questions**, add your `GEMINI_API_KEY` to `.env`:\n"
-                "> ```bash\n"
-                "> echo 'GEMINI_API_KEY=your_key' >> .env\n"
-                "> ```\n\n"
+                "> **To enable live Gemini 2.5 Pro reasoning on any custom question**, configure either:\n"
+                "> 1. **Google AI Mode (API Key):** `echo 'GEMINI_API_KEY=your_key' >> .env`\n"
+                "> 2. **Vertex AI Mode (ADC/Argolis):** `echo 'GCP_PROJECT_ID=your-project-id' >> .env`\n\n"
                 "*(Ask any follow-up question, or type `/resume` when ready to return to your drill)*"
             )
 
@@ -287,10 +318,9 @@ class SocraticArchitectTutorAgent(BaseStudyAgent):
             f"- **Cost Optimization:** Choosing specialized storage engines (e.g. Bigtable for time-series vs Spanner for multi-region ACID SQL) to avoid paying for unneeded features.\n"
             f"{kb_notes}\n\n"
             f"> [!TIP]\n"
-            f"> **To activate real-time Gemini Pro reasoning on any custom question**, configure your `GEMINI_API_KEY`:\n"
-            f"> ```bash\n"
-            f"> echo 'GEMINI_API_KEY=your_actual_api_key' >> .env\n"
-            f"> ```\n\n"
+            f"> **To activate live Gemini Pro reasoning on any custom question**, configure either:\n"
+            f"> - **Google AI Mode:** `echo 'GEMINI_API_KEY=your_key' >> .env`\n"
+            f"> - **Vertex AI Mode (ADC/Argolis):** `echo 'GCP_PROJECT_ID=your-project-id' >> .env`\n\n"
             f"*(Type `/resume` to continue your adaptive drill)*"
         )
 
@@ -318,7 +348,7 @@ class AdaptiveDrillAgent(BaseStudyAgent):
 
 
 class ProgressAnalyticsAgent(BaseStudyAgent):
-    """Certification readiness reporter (routed to Flash model)."""
+    """Progress Analytics agent (routed to Flash model)."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -348,16 +378,7 @@ class StudyCoordinatorAgent(BaseStudyAgent):
         user_input: str,
         session_id: Optional[str] = None,
     ) -> AgentResponse:
-        """Process candidate input, execute safety guardrails, and route to tools or sub-agents.
-
-        Args:
-            user_id (str): Candidate identifier.
-            user_input (str): User message or command.
-            session_id (Optional[str]): Active session ID.
-
-        Returns:
-            AgentResponse: Structured response with metadata and tool traces.
-        """
+        """Process candidate input, execute safety guardrails, and route to tools or sub-agents."""
         with trace_span("coordinator.process_message", {"user_id": user_id, "input_len": len(user_input)}):
             # 1. Safety Guardrail Check
             is_safe, safety_msg = validate_input_safety(user_input)
@@ -467,10 +488,9 @@ class StudyCoordinatorAgent(BaseStudyAgent):
                 search_res = search_pca_knowledge_base(query=clean_inquiry)
                 tool_calls.append({"tool": "search_pca_knowledge_base", "result": search_res})
 
-                # Determine active question ID if in a drill
                 active_q_id = profile.active_drill.current_item_id if profile.active_drill else None
 
-                # Generate dynamic grounded response using Socratic Tutor
+                # Generate dynamic response using Socratic Tutor
                 response_text = self.tutor_agent.answer_inquiry(
                     user_input=clean_inquiry,
                     active_question_id=active_q_id,

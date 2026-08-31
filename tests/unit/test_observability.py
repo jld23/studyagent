@@ -103,3 +103,57 @@ def test_hitl_confirmation_flow():
     assert is_valid is True
     assert pending is not None
     assert pending.action_type == "reset_progress"
+
+
+def test_dynamic_genai_client_google_ai_mode(monkeypatch):
+    """Verify GenAI client initializes in Google AI mode when GEMINI_API_KEY is present."""
+    from unittest.mock import MagicMock, patch
+    from pca_study_agent.agent import get_genai_client
+    from pca_study_agent.config import settings
+
+    monkeypatch.setattr(settings, "gemini_api_key", "test_mock_gemini_api_key_12345")
+    monkeypatch.setattr(settings, "gcp_project_id", None)
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+
+        client = get_genai_client()
+        assert client is not None
+        mock_client_cls.assert_called_once_with(api_key="test_mock_gemini_api_key_12345")
+
+
+def test_dynamic_genai_client_vertex_ai_mode(monkeypatch):
+    """Verify GenAI client initializes in Vertex AI mode with ADC when GEMINI_API_KEY is absent."""
+    from unittest.mock import MagicMock, patch
+    from pca_study_agent.agent import get_genai_client
+    from pca_study_agent.config import settings
+
+    monkeypatch.setattr(settings, "gemini_api_key", None)
+    monkeypatch.setattr(settings, "gcp_project_id", "demo-argolis-project-123")
+    monkeypatch.setattr(settings, "gcp_location", "us-east4")
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+
+        client = get_genai_client()
+        assert client is not None
+        mock_client_cls.assert_called_once_with(
+            vertexai=True,
+            project="demo-argolis-project-123",
+            location="us-east4",
+        )
+
+
+def test_dynamic_genai_client_unconfigured_fallback(monkeypatch):
+    """Verify get_genai_client returns None cleanly when neither API key nor GCP project is configured."""
+    from pca_study_agent.agent import get_genai_client
+    from pca_study_agent.config import settings
+
+    monkeypatch.setattr(settings, "gemini_api_key", None)
+    monkeypatch.setattr(settings, "gcp_project_id", None)
+
+    client = get_genai_client()
+    assert client is None
+

@@ -85,25 +85,44 @@ class ResetProgressRequest(BaseModel):
 
 @router.get("/status/llm", summary="Check LLM Configuration Status")
 async def get_llm_status() -> Dict[str, Any]:
-    """Return whether Gemini LLM is configured and active."""
+    """Return whether Gemini LLM is configured and active in Google AI or Vertex AI mode."""
     client = get_genai_client()
     has_api_key = bool(
         settings.gemini_api_key
         and not settings.gemini_api_key.startswith("your_")
         and len(settings.gemini_api_key.strip()) > 10
     )
-    is_configured = client is not None
-    provider = "gemini_api" if has_api_key else ("vertex_ai" if settings.use_vertex_ai else ("auto_discovered" if is_configured else "unconfigured"))
+    has_gcp_project = bool(
+        settings.gcp_project_id
+        and not settings.gcp_project_id.startswith("your_")
+        and len(settings.gcp_project_id.strip()) > 3
+    )
+
+    if has_api_key:
+        mode = "google_ai"
+        mode_desc = "Google AI Studio Mode (API Key)"
+    elif has_gcp_project:
+        mode = "vertex_ai"
+        mode_desc = f"Vertex AI Mode with ADC (Project: {settings.gcp_project_id}, Region: {settings.gcp_location})"
+    elif client is not None:
+        mode = "auto_discovered"
+        mode_desc = "Auto-Discovered ADC Environment"
+    else:
+        mode = "unconfigured"
+        mode_desc = "Offline Knowledge Mode (No GEMINI_API_KEY or GCP_PROJECT_ID configured)"
 
     return {
-        "llm_configured": is_configured,
+        "llm_configured": client is not None,
+        "mode": mode,
+        "mode_description": mode_desc,
+        "gcp_project_id": settings.gcp_project_id,
+        "gcp_location": settings.gcp_location,
         "flash_model": settings.gemini_flash_model,
         "pro_model": settings.gemini_pro_model,
-        "provider": provider,
         "message": (
-            "Live Gemini LLM is active and connected."
-            if is_configured
-            else "No Gemini API key or Vertex AI credentials configured. Running in offline knowledge synthesis mode."
+            f"Live LLM is active in {mode_desc}."
+            if client is not None
+            else "Neither GEMINI_API_KEY nor GCP_PROJECT_ID configured. Set either in .env to activate live Gemini LLM reasoning."
         ),
     }
 
