@@ -265,3 +265,59 @@ async def reset_candidate_progress(req: ResetProgressRequest) -> Dict[str, Any]:
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res)
     return res
+
+
+class FlagQuestionRouteRequest(BaseModel):
+    user_id: str = Field(description="Candidate user ID")
+    question_id: str = Field(description="ID of question being flagged")
+    reason: str = Field(default="unclear_wording", description="Reason category")
+    feedback_notes: Optional[str] = Field(default=None, description="Candidate feedback notes")
+
+
+class ResolveQuestionRouteRequest(BaseModel):
+    admin_user_id: str = Field(description="Admin user ID")
+    question_id: str = Field(description="ID of question to resolve")
+    action: str = Field(description="Action: 'approve', 'edit', or 'deprecate'")
+    resolution_notes: Optional[str] = Field(default=None, description="Resolution notes")
+
+
+@router.post("/questions/flag", summary="Report/Flag Question & Suspend from Rotation")
+async def flag_question(req: FlagQuestionRouteRequest) -> Dict[str, Any]:
+    """Report an inaccurate or unclear question, suspend it immediately, and notify administrators."""
+    from pca_study_agent.tools import flag_or_challenge_question
+    res = flag_or_challenge_question(
+        user_id=req.user_id,
+        question_id=req.question_id,
+        reason=req.reason,
+        feedback_notes=req.feedback_notes,
+    )
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res)
+    return res
+
+
+@router.get("/questions/flagged", summary="List All Flagged & Suspended Questions")
+async def list_flagged_questions() -> Dict[str, Any]:
+    """Return all questions currently suspended under review for the admin moderation queue."""
+    from pca_study_agent.observability.moderation import get_all_flagged_questions
+    flagged = get_all_flagged_questions()
+    return {
+        "status": "success",
+        "total_flagged": len(flagged),
+        "questions": flagged,
+    }
+
+
+@router.post("/questions/resolve", summary="Resolve Flagged Question Review (Admin)")
+async def resolve_question(req: ResolveQuestionRouteRequest) -> Dict[str, Any]:
+    """Admin resolution to approve, edit, or deprecate a suspended question."""
+    from pca_study_agent.tools import resolve_flagged_question_review
+    res = resolve_flagged_question_review(
+        admin_user_id=req.admin_user_id,
+        question_id=req.question_id,
+        action=req.action,
+        resolution_notes=req.resolution_notes,
+    )
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res)
+    return res

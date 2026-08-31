@@ -143,3 +143,35 @@ async def test_full_candidate_lifecycle_api():
         )
         assert res_reset_conf.status_code == 200
         assert res_reset_conf.json()["action_executed"] is True
+
+        # 12. Flag / Report Question API
+        res_flag = await client.post(
+            "/api/v1/questions/flag",
+            json={
+                "user_id": user_id,
+                "question_id": item_id,
+                "reason": "unclear_wording",
+                "feedback_notes": "Integration test dispute notes.",
+            },
+        )
+        assert res_flag.status_code == 200
+        assert res_flag.json()["is_suspended"] is True
+
+        # 13. List Flagged Questions
+        res_list_flagged = await client.get("/api/v1/questions/flagged")
+        assert res_list_flagged.status_code == 200
+        assert res_list_flagged.json()["total_flagged"] >= 1
+
+        # 14. Admin Resolve Question
+        res_resolve = await client.post(
+            "/api/v1/questions/resolve",
+            json={
+                "admin_user_id": "admin_test",
+                "question_id": item_id,
+                "action": "approve",
+                "resolution_notes": "Approved by lead auditor.",
+            },
+        )
+        assert res_resolve.status_code == 200
+        assert res_resolve.json()["status"] == "success"
+

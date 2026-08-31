@@ -388,7 +388,10 @@
             <span class="tag-badge" id="drillBoxBadge" style="background:#fef7e0; color:#b06000;">Leitner Box 1</span>
             <span class="tag-badge" id="drillDifficultyBadge">Intermediate</span>
           </div>
-          <button class="btn btn-warning" onclick="pauseForDeepDive()">⏸️ Pause & Discuss with Architect</button>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="btn btn-outline" style="color: #d93025; border-color: #fce8e6; font-size: 0.85rem;" onclick="openFlagModal()">🚩 Report Issue</button>
+            <button class="btn btn-warning" onclick="pauseForDeepDive()">⏸️ Pause & Discuss with Architect</button>
+          </div>
         </div>
 
         <div id="drillCaseStudyBadge" class="case-study-tag" style="display:none;">Case Study</div>
@@ -515,7 +518,28 @@
 
         <div id="syncStatusBox" style="font-size: 0.875rem; color: var(--text-muted);"></div>
       </div>
-    </section>
+    <!-- Flag Question Modal -->
+    <div id="flagModal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
+      <div style="background:white; border-radius:12px; max-width:480px; width:90%; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+        <h3 style="margin-bottom:8px; color:#d93025;">🚩 Report Question Issue</h3>
+        <p style="font-size:0.875rem; color:#5f6368; margin-bottom:16px;">
+          Flagging this question will immediately suspend it from rotation for all candidates and queue it for review by our Lead Curriculum Architects.
+        </p>
+        <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:6px;">Issue Category:</label>
+        <select id="flagReasonSelect" class="chat-input" style="width:100%; margin-bottom:14px;">
+          <option value="unclear_wording">Unclear or ambiguous question wording</option>
+          <option value="incorrect_explanation">Inaccurate correct answer or explanation</option>
+          <option value="outdated_feature">Outdated Google Cloud feature or service name</option>
+          <option value="other">Other architectural dispute</option>
+        </select>
+        <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:6px;">Details / Why is this incorrect? (Optional):</label>
+        <textarea id="flagNotesInput" class="chat-input" rows="3" placeholder="Explain the specific issue with the scenario, options, or explanation..." style="width:100%; margin-bottom:18px; border-radius:8px; font-family:inherit;"></textarea>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button class="btn btn-outline" onclick="closeFlagModal()">Cancel</button>
+          <button class="btn btn-primary" style="background:#d93025; border-color:#d93025;" onclick="submitFlagQuestion()">Submit & Suspend Question</button>
+        </div>
+      </div>
+    </div>
 
   </main>
 
@@ -528,6 +552,38 @@
     let selectedOption = null;
     let autoAdvanceTimer = null;
     let isLlmConfigured = false;
+
+    function openFlagModal() {
+      document.getElementById('flagModal').style.display = 'flex';
+    }
+
+    function closeFlagModal() {
+      document.getElementById('flagModal').style.display = 'none';
+    }
+
+    async function submitFlagQuestion() {
+      if (!currentDrillItem) return;
+      const reason = document.getElementById('flagReasonSelect').value;
+      const notes = document.getElementById('flagNotesInput').value;
+      try {
+        const res = await fetch('/api/v1/questions/flag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            question_id: currentDrillItem.item_id,
+            reason: reason,
+            feedback_notes: notes
+          })
+        });
+        const data = await res.json();
+        closeFlagModal();
+        alert('🚩 ' + (data.message || 'Question has been suspended from rotation and submitted for review.'));
+        loadNextDrillItem();
+      } catch (err) {
+        alert('Failed to report question: ' + err.message);
+      }
+    }
 
     document.getElementById('userNameDisplay').textContent = currentUserName;
 

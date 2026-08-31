@@ -15,13 +15,20 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from pca_study_agent.knowledge.exam_domains import PCA_DOMAINS
-from pca_study_agent.knowledge.question_bank import PCA_FLASHCARDS, PCA_QUESTIONS
+from pca_study_agent.knowledge.generator import generate_pca_question
+from pca_study_agent.knowledge.question_bank import ExamQuestion, PCA_FLASHCARDS, PCA_QUESTIONS
+from pca_study_agent.knowledge.questions_repository import questions_repo
 from pca_study_agent.knowledge.retriever import retriever
 from pca_study_agent.knowledge.sync_engine import sync_engine
 from pca_study_agent.memory.spaced_repetition import SpacedRepetitionScheduler
 from pca_study_agent.memory.user_manager import ActiveDrillState, user_manager
 from pca_study_agent.observability.hitl import hitl_manager
 from pca_study_agent.observability.logger import log_agent_intent, log_agent_outcome, logger
+from pca_study_agent.observability.moderation import (
+    get_all_flagged_questions,
+    publish_question_flagged_event,
+    resolve_question_moderation,
+)
 from pca_study_agent.observability.telemetry import get_current_trace_id, trace_span
 
 
@@ -272,6 +279,49 @@ class DestructiveActionConfirmationOutput(BaseModel):
     message: str
 
 
+class FlagQuestionInput(BaseModel):
+    """Input schema for reporting / flagging an inaccurate or unclear question."""
+
+    user_id: str = Field(description="Candidate identifier reporting the question.")
+    question_id: str = Field(description="ID of the question being flagged.")
+    reason: str = Field(
+        default="unclear_wording",
+        description="Reason for dispute: 'unclear_wording', 'incorrect_explanation', 'outdated_feature', or 'other'.",
+    )
+    feedback_notes: Optional[str] = Field(
+        default=None,
+        description="Detailed feedback or clarification notes from candidate.",
+    )
+
+
+class FlagQuestionOutput(BaseModel):
+    """Output schema for question flagging and suspension."""
+
+    status: str = "success"
+    question_id: str
+    is_suspended: bool
+    message: str
+    event: Dict[str, Any]
+
+
+class ResolveQuestionInput(BaseModel):
+    """Input schema for admin resolving a flagged question."""
+
+    admin_user_id: str = Field(description="Admin identifier.")
+    question_id: str = Field(description="ID of question to resolve.")
+    action: str = Field(description="Resolution action: 'approve', 'edit', or 'deprecate'.")
+    resolution_notes: Optional[str] = Field(default=None, description="Admin explanation / resolution notes.")
+
+
+class ResolveQuestionOutput(BaseModel):
+    """Output schema for admin question resolution."""
+
+    status: str = "success"
+    question_id: str
+    action: str
+    message: str
+
+
 # ============================================================================
 # Core ADK Tool Implementations
 # ============================================================================
@@ -388,8 +438,9 @@ def fetch_diagnostic_assessment_batch(
         params = DiagnosticBatchInput(user_id=user_id, num_questions=num_questions)
         profile = user_manager.get_or_create_user(params.user_id)
 
-        # Select representative questions across available domains
-        selected_questions = PCA_QUESTIONS[: params.num_questions]
+        # Select representative questions across available domains (excluding suspended items)
+        active_questions = questions_repo.get_active_questions()
+        selected_questions = active_questions[: params.num_questions]
         question_ids = [q.id for q in selected_questions]
 
         # Initialize active drill session
@@ -557,15 +608,32 @@ def fetch_adaptive_drill_item(
                 active_drill_status="active",
             ).model_dump()
         else:
-            # Pick scenario question
-            candidates = [q for q in PCA_QUESTIONS if not params.target_domain_id or q.domain_id == selected_domain_id]
-            if not candidates:
-                candidates = PCA_QUESTIONS
+            # Fetch active (non-suspended, non-deprecated) scenario questions
+            candidates = questions_repo.get_active_questions(
+                domain_id=selected_domain_id if params.target_domain_id else None
+            )
 
-            # If all candidates in target domain were just seen and other questions exist, broaden search
-            if len(candidates) > 0 and all(q.id == last_item_id for q in candidates) and len(PCA_QUESTIONS) > 1:
-                candidates = [q for q in PCA_QUESTIONS if q.id != last_item_id]
-            elif len(candidates) > 1:
+            # If no active questions in repository for domain, dynamically generate one on-demand!
+            if not candidates:
+                try:
+                    new_q = generate_pca_question(domain_id=selected_domain_id)
+                    questions_repo.save_question(new_q)
+                    candidates = [new_q]
+                except Exception:
+                    candidates = questions_repo.get_active_questions()
+
+            # Check for unseen questions for this candidate
+            unseen = [q for q in candidates if q.id not in profile.seen_item_ids]
+            if not unseen and len(candidates) > 0 and not params.target_domain_id:
+                # Candidate has seen all active questions in this domain! Generate fresh on-demand question!
+                try:
+                    new_q = generate_pca_question(domain_id=selected_domain_id)
+                    questions_repo.save_question(new_q)
+                    candidates = [new_q]
+                except Exception:
+                    pass
+
+            if len(candidates) > 1:
                 non_immediate = [q for q in candidates if q.id != last_item_id]
                 if non_immediate:
                     candidates = non_immediate
@@ -593,7 +661,10 @@ def fetch_adaptive_drill_item(
                 active_drill_status="active",
             ).model_dump()
 
-        # Update active drill state
+        # Update active drill state & record zero-cost seen item ID
+        if output["item_id"] not in profile.seen_item_ids:
+            profile.seen_item_ids.append(output["item_id"])
+
         if not profile.active_drill:
             profile.active_drill = ActiveDrillState(
                 session_id=f"drill_{uuid.uuid4().hex[:8]}",
@@ -1225,3 +1296,143 @@ def search_pca_knowledge_base(query: str, domain_filter: Optional[str] = None) -
         "total_results": len(results),
         "results": [r.model_dump() for r in results],
     }
+
+
+def flag_or_challenge_question(
+    user_id: str,
+    question_id: str,
+    reason: str = "unclear_wording",
+    feedback_notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Flag a question for administrator review and immediately suspend it from rotation.
+
+    Args:
+        user_id (str): Candidate identifier reporting the issue.
+        question_id (str): ID of the question being flagged (e.g. 'q_pca_001').
+        reason (str): Reason category ('unclear_wording', 'incorrect_explanation', 'outdated_feature', 'other').
+        feedback_notes (Optional[str]): Detailed explanation of why the question is disputed.
+
+    Returns:
+        Dict[str, Any]: Status confirmation payload indicating question suspension and Pub/Sub notification.
+    """
+    trace_id = get_current_trace_id()
+    start_time = log_agent_intent(
+        action_name="flag_or_challenge_question",
+        user_id=user_id,
+        session_id=user_id,
+        target_component="ModerationQueue",
+        intended_parameters={"user_id": user_id, "question_id": question_id, "reason": reason},
+        trace_id=trace_id,
+    )
+
+    try:
+        params = FlagQuestionInput(
+            user_id=user_id,
+            question_id=question_id,
+            reason=reason,
+            feedback_notes=feedback_notes,
+        )
+
+        res = publish_question_flagged_event(
+            user_id=params.user_id,
+            question_id=params.question_id,
+            reason=params.reason,
+            feedback_notes=params.feedback_notes,
+        )
+
+        output = FlagQuestionOutput(
+            status="success",
+            question_id=res["question_id"],
+            is_suspended=res["is_suspended"],
+            message=res["message"],
+            event=res["event"],
+        ).model_dump()
+
+        log_agent_outcome(
+            action_name="flag_or_challenge_question",
+            user_id=user_id,
+            session_id=user_id,
+            status="success",
+            start_time=start_time,
+            result_summary=output,
+            trace_id=trace_id,
+        )
+        return output
+
+    except Exception as exc:
+        err = ToolErrorResponse(
+            error_code="FLAG_QUESTION_ERROR",
+            message=f"Failed to flag question: {str(exc)}",
+            recovery_suggestion="Ensure valid question_id and user_id are supplied.",
+        ).model_dump()
+        return err
+
+
+def resolve_flagged_question_review(
+    admin_user_id: str,
+    question_id: str,
+    action: str,  # 'approve', 'edit', 'deprecate'
+    resolution_notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Admin resolution tool to review, un-suspend, edit, or deprecate a flagged question.
+
+    Args:
+        admin_user_id (str): Administrator username or identifier.
+        question_id (str): ID of the question to resolve.
+        action (str): Resolution action ('approve', 'edit', 'deprecate').
+        resolution_notes (Optional[str]): Explanation or audit notes for the resolution.
+
+    Returns:
+        Dict[str, Any]: Resolution confirmation status payload.
+    """
+    trace_id = get_current_trace_id()
+    start_time = log_agent_intent(
+        action_name="resolve_flagged_question_review",
+        user_id=admin_user_id,
+        session_id=admin_user_id,
+        target_component="ModerationQueue",
+        intended_parameters={"admin_id": admin_user_id, "question_id": question_id, "action": action},
+        trace_id=trace_id,
+    )
+
+    try:
+        params = ResolveQuestionInput(
+            admin_user_id=admin_user_id,
+            question_id=question_id,
+            action=action,
+            resolution_notes=resolution_notes,
+        )
+
+        res = resolve_question_moderation(
+            admin_user_id=params.admin_user_id,
+            question_id=params.question_id,
+            action=params.action,
+            resolution_notes=params.resolution_notes,
+        )
+
+        output = ResolveQuestionOutput(
+            status=res["status"],
+            question_id=res["question_id"],
+            action=res.get("action", action),
+            message=res["message"],
+        ).model_dump()
+
+        log_agent_outcome(
+            action_name="resolve_flagged_question_review",
+            user_id=admin_user_id,
+            session_id=admin_user_id,
+            status="success",
+            start_time=start_time,
+            result_summary=output,
+            trace_id=trace_id,
+        )
+        return output
+
+    except Exception as exc:
+        err = ToolErrorResponse(
+            error_code="RESOLVE_FLAG_ERROR",
+            message=f"Failed to resolve question review: {str(exc)}",
+            recovery_suggestion="Provide valid action ('approve', 'edit', 'deprecate') and question_id.",
+        ).model_dump()
+        return err
+

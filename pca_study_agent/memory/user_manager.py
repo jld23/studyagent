@@ -66,7 +66,8 @@ class UserProfile(BaseModel):
     history_summary: str = ""
     messages: List[ConversationMessage] = Field(default_factory=list)
 
-    # Cumulative statistics
+    # Cumulative statistics and zero-cost seen item tracking
+    seen_item_ids: List[str] = Field(default_factory=list)
     total_questions_answered: int = 0
     total_correct_answers: int = 0
 

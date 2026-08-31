@@ -105,6 +105,18 @@ def run_continuous_drill(user_id: str, candidate_name: str) -> None:
                     )
                     continue
 
+                elif lower_choice.startswith(("/flag", "flag", "report")):
+                    from pca_study_agent.tools import flag_or_challenge_question
+                    reason_notes = user_choice.replace("/flag", "").replace("flag", "").replace("report", "").strip() or "Candidate reported question as unclear/incorrect"
+                    flag_res = flag_or_challenge_question(
+                        user_id=user_id,
+                        question_id=item_id,
+                        reason="unclear_wording",
+                        feedback_notes=reason_notes,
+                    )
+                    console.print(f"\n[bold yellow]🚩 Question '{item_id}' has been flagged and suspended from rotation. Moving to next question...[/bold yellow]\n")
+                    break
+
                 elif lower_choice.startswith(("/pause", "pause", "explain", "why")):
                     # Enter Socratic deep-dive mode
                     run_socratic_deep_dive(user_id=user_id, candidate_name=candidate_name, context_item=item_id)
