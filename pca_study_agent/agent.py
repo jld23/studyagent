@@ -255,6 +255,7 @@ class SocraticArchitectTutorAgent(BaseStudyAgent):
                         config=genai_types.GenerateContentConfig(
                             system_instruction=system_instruction,
                             temperature=0.3,
+                            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
                         ),
                     )
                     if response and response.text:
