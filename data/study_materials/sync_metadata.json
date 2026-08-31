@@ -1,6 +1,6 @@
 {
   "current_version": "2026.08-v1",
-  "last_synced_at": "2026-08-31T19:07:54.219360+00:00",
+  "last_synced_at": "2026-08-31T19:23:33.885751+00:00",
   "total_official_docs": 10,
   "total_user_docs": 1,
   "sync_interval": "weekly",
@@ -75,6 +75,10 @@
     },
     {
       "date": "2026-08-31T19:07:54.219360+00:00",
+      "message": "Weekly sync check completed: Official PCA syllabus and case studies verified up to date."
+    },
+    {
+      "date": "2026-08-31T19:23:33.885751+00:00",
       "message": "Weekly sync check completed: Official PCA syllabus and case studies verified up to date."
     }
   ]

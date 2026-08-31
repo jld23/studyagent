@@ -503,13 +503,39 @@ def fetch_adaptive_drill_item(
 
         mastery_score = profile.domain_mastery.get(selected_domain_id, 0.5)
 
+        # Track recently served items to strictly prevent duplicate consecutive questions
+        last_item_id = profile.active_drill.current_item_id if profile.active_drill else None
+        recent_history_ids: List[str] = []
+        if profile.active_drill and profile.active_drill.completed_items:
+            recent_history_ids = [
+                item.get("item_id") for item in profile.active_drill.completed_items[-6:] if item.get("item_id")
+            ]
+        if last_item_id and last_item_id not in recent_history_ids:
+            recent_history_ids.append(last_item_id)
+
+        def score_candidate(item_id: str) -> tuple[int, int, float]:
+            """Rank candidates: unseen > lower leitner box > older review."""
+            is_immediate_last = 10 if item_id == last_item_id else 0
+            is_recent = 2 if item_id in recent_history_ids else 0
+            rec = profile.spaced_items.get(item_id)
+            box = rec.box_number if rec else 1
+            last_rev = float(rec.last_reviewed_at) if rec and rec.last_reviewed_at else 0.0
+            return (is_immediate_last + is_recent, box, last_rev)
+
         # Decide question vs flashcard
         if params.preferred_item_type == "flashcard":
             # Pick flashcard
-            matching_cards = [fc for fc in PCA_FLASHCARDS if fc.domain_id == selected_domain_id]
-            if not matching_cards:
-                matching_cards = PCA_FLASHCARDS
-            card = matching_cards[0]
+            candidates = [fc for fc in PCA_FLASHCARDS if not params.target_domain_id or fc.domain_id == selected_domain_id]
+            if not candidates:
+                candidates = PCA_FLASHCARDS
+
+            if len(candidates) > 1:
+                non_immediate = [fc for fc in candidates if fc.id != last_item_id]
+                if non_immediate:
+                    candidates = non_immediate
+
+            sorted_cards = sorted(candidates, key=lambda c: score_candidate(c.id))
+            card = sorted_cards[0]
             item_record = profile.spaced_items.get(card.id)
             box_num = item_record.box_number if item_record else 1
 
@@ -532,10 +558,20 @@ def fetch_adaptive_drill_item(
             ).model_dump()
         else:
             # Pick scenario question
-            matching_questions = [q for q in PCA_QUESTIONS if q.domain_id == selected_domain_id]
-            if not matching_questions:
-                matching_questions = PCA_QUESTIONS
-            q = matching_questions[0]
+            candidates = [q for q in PCA_QUESTIONS if not params.target_domain_id or q.domain_id == selected_domain_id]
+            if not candidates:
+                candidates = PCA_QUESTIONS
+
+            # If all candidates in target domain were just seen and other questions exist, broaden search
+            if len(candidates) > 0 and all(q.id == last_item_id for q in candidates) and len(PCA_QUESTIONS) > 1:
+                candidates = [q for q in PCA_QUESTIONS if q.id != last_item_id]
+            elif len(candidates) > 1:
+                non_immediate = [q for q in candidates if q.id != last_item_id]
+                if non_immediate:
+                    candidates = non_immediate
+
+            sorted_questions = sorted(candidates, key=lambda q: score_candidate(q.id))
+            q = sorted_questions[0]
             item_record = profile.spaced_items.get(q.id)
             box_num = item_record.box_number if item_record else 1
 

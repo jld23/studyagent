@@ -122,3 +122,31 @@ def test_end_to_end_tool_execution_flow():
     rep = generate_certification_domain_progress_report(user_id="unit_tester")
     assert rep["status"] == "success"
     assert len(rep["domain_breakdown"]) == 6
+
+
+def test_continuous_drill_no_consecutive_duplicate_questions():
+    """Verify that continuous drill never serves the same question twice in a row."""
+    user_id = "anti_duplication_tester"
+    authenticate_or_register_candidate(user_id=user_id, candidate_name="Anti-Duplication Tester")
+
+    served_item_ids = []
+    for _ in range(8):
+        drill = fetch_adaptive_drill_item(user_id=user_id, preferred_item_type="question")
+        assert drill["status"] == "success"
+        current_id = drill["item_id"]
+
+        if served_item_ids:
+            assert current_id != served_item_ids[-1], f"Question {current_id} was served twice consecutively!"
+
+        served_item_ids.append(current_id)
+
+        # Simulate answering
+        evaluate_scenario_answer_and_update_mastery(
+            user_id=user_id,
+            item_id=current_id,
+            submitted_answer="B",
+        )
+
+    # Ensure multiple unique questions were served
+    assert len(set(served_item_ids)) >= 4
+
