@@ -1,8 +1,10 @@
 """Configuration and Secure Secret Management for PCA Study Agent.
 
-Ensures zero hardcoded credentials and dynamically supports both:
+Ensures zero hardcoded credentials and dynamically supports:
 1. Google AI Mode (API Key from Google AI Studio / Gemini API)
 2. Vertex AI Mode (Application Default Credentials / ADC with GCP_PROJECT_ID)
+
+Supports single unified `GEMINI_MODEL` or fine-grained `GEMINI_FLASH_MODEL` / `GEMINI_PRO_MODEL`.
 """
 
 from __future__ import annotations
@@ -51,8 +53,13 @@ class Settings(BaseModel):
     gemini_api_key: Optional[str] = Field(
         default_factory=lambda: os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     )
-    gemini_flash_model: str = Field(default_factory=lambda: os.getenv("GEMINI_FLASH_MODEL", "gemini-3.7-flash"))
-    gemini_pro_model: str = Field(default_factory=lambda: os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro"))
+    gemini_model: Optional[str] = Field(default_factory=lambda: os.getenv("GEMINI_MODEL"))
+    gemini_flash_model: str = Field(
+        default_factory=lambda: os.getenv("GEMINI_FLASH_MODEL") or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    )
+    gemini_pro_model: str = Field(
+        default_factory=lambda: os.getenv("GEMINI_PRO_MODEL") or os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+    )
 
     # Google Cloud / Vertex AI settings
     gcp_project_id: Optional[str] = Field(
