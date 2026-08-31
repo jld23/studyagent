@@ -111,6 +111,11 @@ async def get_llm_status() -> Dict[str, Any]:
         mode = "unconfigured"
         mode_desc = "Offline Knowledge Mode (No GEMINI_API_KEY or GCP_PROJECT_ID configured)"
 
+    available = []
+    if client is not None:
+        from pca_study_agent.models_manager import list_available_gemini_models
+        available = list_available_gemini_models(client)
+
     return {
         "llm_configured": client is not None,
         "mode": mode,
@@ -119,6 +124,7 @@ async def get_llm_status() -> Dict[str, Any]:
         "gcp_location": settings.gcp_location,
         "flash_model": settings.gemini_flash_model,
         "pro_model": settings.gemini_pro_model,
+        "available_models": available,
         "message": (
             f"Live LLM is active in {mode_desc}."
             if client is not None

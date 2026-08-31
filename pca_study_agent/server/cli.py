@@ -215,8 +215,22 @@ def run_interactive_cli() -> None:
         )
     )
 
-    user_id = args.user
-    candidate_name = args.name
+    # Startup Model Discovery & Validation
+    from pca_study_agent.config import settings
+    from pca_study_agent.models_manager import validate_and_resolve_models
+
+    res_flash, res_pro, available_models, warning_msg = validate_and_resolve_models(
+        flash_model=settings.gemini_flash_model,
+        pro_model=settings.gemini_pro_model,
+        interactive=True,
+    )
+    settings.gemini_flash_model = res_flash
+    settings.gemini_pro_model = res_pro
+
+    if available_models:
+        console.print(
+            f"[dim]🤖 LLM Active | Flash Model: [bold green]{res_flash}[/bold green] | Pro Model: [bold green]{res_pro}[/bold green][/dim]"
+        )
 
     auth_res = authenticate_or_register_candidate(user_id=user_id, candidate_name=candidate_name)
     console.print(f"\n[bold green]{auth_res.get('message')}[/bold green]\n")

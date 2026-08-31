@@ -24,14 +24,28 @@ STATIC_DIR = Path(__file__).parent / "static"
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager for startup and shutdown hooks."""
+    from pca_study_agent.models_manager import validate_and_resolve_models
+
     settings.ensure_directories()
     settings.resolve_secrets()
+
+    # Validate and resolve configured model IDs on startup
+    res_flash, res_pro, available_models, warning_msg = validate_and_resolve_models(
+        flash_model=settings.gemini_flash_model,
+        pro_model=settings.gemini_pro_model,
+        interactive=False,
+    )
+    settings.gemini_flash_model = res_flash
+    settings.gemini_pro_model = res_pro
+
     logger.info(
         "PCA Study Agent Server Starting",
         version=settings.app_version,
         environment=settings.environment,
         flash_model=settings.gemini_flash_model,
         pro_model=settings.gemini_pro_model,
+        available_models_count=len(available_models),
+        validation_warning=warning_msg,
     )
     yield
     logger.info("PCA Study Agent Server Shutting Down")
