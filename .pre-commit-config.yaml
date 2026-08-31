@@ -1,0 +1,17 @@
+# .pre-commit-config.yaml
+# Enforces AgentOps 19-criteria matrix and pytest suites before git commits
+
+repos:
+  - repo: local
+    hooks:
+      - id: agentops-audit
+        name: AgentOps 19-Criteria Matrix Audit
+        entry: uv run python scripts/agentops_audit.py
+        language: system
+        pass_filenames: false
+
+      - id: pytest-unit-tests
+        name: Pytest Unit & Integration Suite
+        entry: uv run pytest tests/ -v --tb=short
+        language: system
+        pass_filenames: false
