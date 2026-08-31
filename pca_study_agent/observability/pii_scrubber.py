@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Union
 
 # Patterns for sensitive data detection
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
-API_KEY_REGEX = re.compile(r"(?:AIza[0-9A-Za-z-_]{35}|bearer\s+[a-zA-Z0-9._~+/-]+=*)", re.IGNORECASE)
+API_KEY_REGEX = re.compile(r"(?:AIza[0-9A-Za-z-_]{30,40}|bearer\s+[a-zA-Z0-9._~+/-]+=*)", re.IGNORECASE)
 BEARER_TOKEN_REGEX = re.compile(r"bearer\s+[a-zA-Z0-9_\-\.=]+", re.IGNORECASE)
 PROJECT_ID_REGEX = re.compile(r"(?:projects/|project_id=)[a-z0-9-]{6,30}", re.IGNORECASE)
 

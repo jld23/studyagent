@@ -20,19 +20,19 @@ from pca_study_agent.observability.telemetry import trace_span
 
 def test_pii_redaction_text_and_data():
     """Verify that email addresses, API keys, and sensitive dictionary fields are scrubbed."""
-    raw_text = "Candidate alex.smith@example.com used API key AIzaSyD3LJeW4Q6gtdgJlyeFZUp-GhpIoc6EUeg in project."
+    raw_text = "Candidate alex.smith@example.com used API key AIzaSyFakeTestingDummyKeyScrubbedXXXX in project."
     scrubbed = redact_pii_text(raw_text)
 
     assert "alex.smith@example.com" not in scrubbed
     assert "[REDACTED_EMAIL]" in scrubbed
-    assert "AIzaSyD3LJeW4Q6gtdgJlyeFZUp-GhpIoc6EUeg" not in scrubbed
+    assert "AIzaSyFakeTestingDummyKeyScrubbedXXXX" not in scrubbed
     assert "[REDACTED_API_KEY]" in scrubbed
 
     # Test recursive dictionary scrubbing
     payload = {
-        "user_email": "candidate@google.com",
+        "user_email": "candidate@example.com",
         "api_key": "secret_token_val_123",
-        "nested": {"contact": "support@cloud.google.com"},
+        "nested": {"contact": "support@example.com"},
     }
     sanitized = redact_pii_data(payload)
     assert sanitized["user_email"] == "[REDACTED_EMAIL]"

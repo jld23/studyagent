@@ -179,7 +179,7 @@ def audit_agentops_matrix() -> tuple[int, int, list[dict]]:
     checks.append({"cat": "4. Observability", "name": "OpenTelemetry Distributed Tracing", "pts": score, "max": 5, "status": "PASS" if trace_passed else "FAIL"})
 
     # 16. PII Redaction (5 pts)
-    pii_res = redact_pii_text("test user@google.com with key AIzaSyD3LJeW4Q6gtdgJlyeFZUp-GhpIoc6EUeg")
+    pii_res = redact_pii_text("test candidate@example.com with key AIzaSyFakeTestingDummyKeyScrubbedXXXX")
     pii_passed = "[REDACTED_EMAIL]" in pii_res and "[REDACTED_API_KEY]" in pii_res
     score = 5 if pii_passed else 0
     total_score += score
