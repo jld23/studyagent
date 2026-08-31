@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from pca_study_agent.agent import root_agent
+from pca_study_agent.agent import get_genai_client, root_agent
+from pca_study_agent.config import settings
 from pca_study_agent.tools import (
     authenticate_or_register_candidate,
     evaluate_scenario_answer_and_update_mastery,
@@ -58,7 +59,7 @@ class DrillSubmitRequest(BaseModel):
 
 class PauseRequest(BaseModel):
     user_id: str = Field(description="Candidate user ID")
-    topic_of_inquiry: Optional[str] = Field(default=None, description="Topic to discuss")
+    topic_of_inquiry: Optional[str] = Field(default=None, description="Topic or concept to explore")
 
 
 class ResumeRequest(BaseModel):
@@ -67,10 +68,10 @@ class ResumeRequest(BaseModel):
 
 class MaterialUploadRequest(BaseModel):
     user_id: str = Field(description="Candidate user ID")
-    title: str = Field(min_length=3, max_length=200, description="Title of note")
-    content: str = Field(min_length=10, description="Markdown/text note content")
-    domain_id: Optional[str] = Field(default=None, description="Optional domain ID")
-    tags: List[str] = Field(default_factory=list, description="Tags/keywords")
+    title: str = Field(min_length=3, max_length=128, description="Material title")
+    content: str = Field(min_length=10, description="Markdown or text content")
+    domain_id: Optional[str] = Field(default=None, description="Associated domain ID")
+    tags: List[str] = Field(default_factory=list, description="Categorization tags")
 
 
 class ResetProgressRequest(BaseModel):
@@ -79,12 +80,37 @@ class ResetProgressRequest(BaseModel):
 
 
 # ============================================================================
-# API Endpoints
+# Route Handlers
 # ============================================================================
 
-@router.post("/auth/register", summary="Register or Login Candidate Profile")
+@router.get("/status/llm", summary="Check LLM Configuration Status")
+async def get_llm_status() -> Dict[str, Any]:
+    """Return whether Gemini LLM is configured and active."""
+    client = get_genai_client()
+    has_api_key = bool(
+        settings.gemini_api_key
+        and not settings.gemini_api_key.startswith("your_")
+        and len(settings.gemini_api_key.strip()) > 10
+    )
+    is_configured = client is not None
+    provider = "gemini_api" if has_api_key else ("vertex_ai" if settings.use_vertex_ai else ("auto_discovered" if is_configured else "unconfigured"))
+
+    return {
+        "llm_configured": is_configured,
+        "flash_model": settings.gemini_flash_model,
+        "pro_model": settings.gemini_pro_model,
+        "provider": provider,
+        "message": (
+            "Live Gemini LLM is active and connected."
+            if is_configured
+            else "No Gemini API key or Vertex AI credentials configured. Running in offline knowledge synthesis mode."
+        ),
+    }
+
+
+@router.post("/auth/register", summary="Authenticate or Register Candidate")
 async def register_candidate(req: RegisterRequest) -> Dict[str, Any]:
-    """Authenticate or register a candidate and retrieve their current readiness profile."""
+    """Register or load a candidate profile with multi-user isolation."""
     res = authenticate_or_register_candidate(
         user_id=req.user_id,
         candidate_name=req.candidate_name,
@@ -95,37 +121,40 @@ async def register_candidate(req: RegisterRequest) -> Dict[str, Any]:
     return res
 
 
-@router.post("/chat", summary="Chat with Study Coordinator Multi-Agent")
-async def chat_interaction(req: ChatRequest) -> Dict[str, Any]:
-    """Interact with the root Coordinator, which intelligently routes to tools and specialists."""
-    agent_response = root_agent.process_message(
+@router.post("/chat", summary="Send Message to Study Coordinator Agent")
+async def send_chat_message(req: ChatRequest) -> Dict[str, Any]:
+    """Send a message to the coordinator agent, executing safety guardrails and routing."""
+    response = root_agent.process_message(
         user_id=req.user_id,
         user_input=req.message,
         session_id=req.session_id,
     )
-    return agent_response.model_dump()
+    return response.model_dump()
 
 
-@router.post("/assessment/start", summary="Start Initial Diagnostic Assessment")
-async def start_diagnostic_assessment(req: AssessmentStartRequest) -> Dict[str, Any]:
-    """Generate a multi-domain baseline assessment to evaluate candidate starting proficiency."""
-    res = fetch_diagnostic_assessment_batch(user_id=req.user_id, num_questions=req.num_questions)
+@router.post("/assessment/start", summary="Start Diagnostic Assessment")
+async def start_assessment(req: AssessmentStartRequest) -> Dict[str, Any]:
+    """Start a comprehensive 6-domain baseline diagnostic assessment."""
+    res = fetch_diagnostic_assessment_batch(
+        user_id=req.user_id,
+        num_questions=req.num_questions,
+    )
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res)
     return res
 
 
 @router.get("/drill/next", summary="Fetch Next Adaptive Drill Item")
-async def get_adaptive_drill_item(
+async def get_next_drill_item(
     user_id: str = Query(..., description="Candidate user ID"),
-    item_type: str = Query("question", description="'question' or 'flashcard'"),
-    domain_id: Optional[str] = Query(None, description="Optional domain filter e.g. 'domain_1'"),
+    item_type: str = Query("question", description="Preferred item type: question, flashcard, any"),
+    target_domain_id: Optional[str] = Query(None, description="Optional target domain"),
 ) -> Dict[str, Any]:
-    """Retrieve the next spaced-repetition scenario question or flashcard targeting weakest domains."""
+    """Fetch the next adaptive drill item prioritized by Leitner spaced repetition."""
     res = fetch_adaptive_drill_item(
         user_id=user_id,
         preferred_item_type=item_type,
-        target_domain_id=domain_id,
+        target_domain_id=target_domain_id,
     )
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res)
@@ -134,7 +163,7 @@ async def get_adaptive_drill_item(
 
 @router.post("/drill/submit", summary="Submit Answer and Update Mastery")
 async def submit_drill_answer(req: DrillSubmitRequest) -> Dict[str, Any]:
-    """Grade answer submission, return distractor analysis, and update Leitner box and domain mastery."""
+    """Submit an answer to an active question or flashcard, updating spaced repetition mastery."""
     res = evaluate_scenario_answer_and_update_mastery(
         user_id=req.user_id,
         item_id=req.item_id,
@@ -146,9 +175,9 @@ async def submit_drill_answer(req: DrillSubmitRequest) -> Dict[str, Any]:
     return res
 
 
-@router.post("/drill/pause", summary="Pause Drill for Socratic Deep-Dive")
-async def pause_drill(req: PauseRequest) -> Dict[str, Any]:
-    """Pause the active assessment session and switch to Socratic Architect Tutor mode."""
+@router.post("/drill/pause", summary="Pause Assessment for Deep-Dive Socratic Discussion")
+async def pause_assessment(req: PauseRequest) -> Dict[str, Any]:
+    """Pause the active assessment/drill to discuss trade-offs with the Principal Architect."""
     res = pause_assessment_session_for_deep_dive(
         user_id=req.user_id,
         topic_of_inquiry=req.topic_of_inquiry,
@@ -158,9 +187,9 @@ async def pause_drill(req: PauseRequest) -> Dict[str, Any]:
     return res
 
 
-@router.post("/drill/resume", summary="Resume Paused Drill")
-async def resume_drill(req: ResumeRequest) -> Dict[str, Any]:
-    """Resume a paused drill session and return to the active question queue."""
+@router.post("/drill/resume", summary="Resume Paused Assessment Session")
+async def resume_assessment(req: ResumeRequest) -> Dict[str, Any]:
+    """Resume the active assessment or drill after completing a deep dive."""
     res = resume_assessment_session(user_id=req.user_id)
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res)

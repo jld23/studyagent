@@ -152,7 +152,20 @@ def run_continuous_drill(user_id: str, candidate_name: str) -> None:
 
 def run_socratic_deep_dive(user_id: str, candidate_name: str, context_item: str) -> None:
     """Interactive Socratic deep-dive chat with Principal Architect."""
+    from pca_study_agent.agent import get_genai_client
     pause_assessment_session_for_deep_dive(user_id=user_id)
+
+    client = get_genai_client()
+    if not client:
+        console.print(
+            Panel(
+                "[bold yellow]⚠️ Live Gemini LLM Not Configured (Running in Offline Knowledge Mode)[/bold yellow]\n"
+                "[dim]To enable full dynamic conversational reasoning with Gemini 2.5 Pro on arbitrary questions,\n"
+                "add your GEMINI_API_KEY to .env (e.g. echo 'GEMINI_API_KEY=your_key' >> .env)[/dim]",
+                border_style="yellow",
+            )
+        )
+
     console.print(
         Panel(
             "[bold green]🎓 Socratic Architect Tutor (Deep-Dive Mode)[/bold green]\n"

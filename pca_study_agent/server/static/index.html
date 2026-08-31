@@ -358,7 +358,7 @@
       <div>
         <div class="brand-title">Google Cloud PCA Study Agent</div>
       </div>
-      <span class="brand-badge">Gemini LLM & ADK</span>
+      <span class="brand-badge" id="llmStatusBadge">Checking LLM...</span>
     </div>
 
     <div class="user-pill">
@@ -431,6 +431,17 @@
     <!-- 3. Socratic Architect Tutor Deep-Dive View -->
     <section id="deepdiveTab" class="tab-content" style="display:none;">
       <div class="card">
+        <!-- Prominent LLM Offline Alert Banner -->
+        <div id="llmAlertBanner" style="display:none; background: #fef7e0; border-left: 4px solid #f9ab00; padding: 14px 16px; border-radius: 8px; margin-bottom: 16px; color: #202124;">
+          <div style="font-weight: 700; color: #b06000; display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+            ⚠️ Live Gemini LLM Not Configured (Running in Offline Knowledge Mode)
+          </div>
+          <div style="font-size: 0.875rem; color: #5f6368; line-height: 1.4;">
+            The Socratic tutor is currently using offline grounded knowledge synthesis. To enable full dynamic conversational reasoning with <strong>Gemini 2.5 Pro</strong> on arbitrary questions, add your <code>GEMINI_API_KEY</code> to <code>.env</code>:
+            <pre style="background: #202124; color: #fff; padding: 8px 12px; border-radius: 6px; margin-top: 6px; font-size: 0.85rem; overflow-x: auto;">echo "GEMINI_API_KEY=your_gemini_api_key_here" >> .env</pre>
+          </div>
+        </div>
+
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <div>
             <h2>🎓 Senior Google Cloud Principal Architect Tutor</h2>
@@ -516,8 +527,34 @@
     let currentDrillItem = null;
     let selectedOption = null;
     let autoAdvanceTimer = null;
+    let isLlmConfigured = false;
 
     document.getElementById('userNameDisplay').textContent = currentUserName;
+
+    async function checkLlmStatus() {
+      try {
+        const res = await fetch('/api/v1/status/llm');
+        const data = await res.json();
+        isLlmConfigured = data.llm_configured;
+
+        const badge = document.getElementById('llmStatusBadge');
+        const alertBanner = document.getElementById('llmAlertBanner');
+
+        if (isLlmConfigured) {
+          badge.textContent = '🟢 Gemini Pro Connected';
+          badge.style.background = '#e6f4ea';
+          badge.style.color = '#1e8e3e';
+          if (alertBanner) alertBanner.style.display = 'none';
+        } else {
+          badge.textContent = '🟡 Offline Knowledge Mode';
+          badge.style.background = '#fef7e0';
+          badge.style.color = '#b06000';
+          if (alertBanner) alertBanner.style.display = 'block';
+        }
+      } catch (err) {
+        console.log("LLM status check error:", err);
+      }
+    }
 
     function switchUserPrompt() {
       const newId = prompt("Enter Candidate User ID:", currentUserId);
@@ -540,6 +577,7 @@
           body: JSON.stringify({ user_id: currentUserId, candidate_name: currentUserName })
         });
         loadNextDrillItem();
+        checkLlmStatus();
       } catch (err) {
         console.error("Auth failed:", err);
       }
@@ -554,6 +592,7 @@
       event.currentTarget.classList.add('active');
 
       if (tabName === 'progress') loadProgressReport();
+      if (tabName === 'deepdive') checkLlmStatus();
     }
 
     async function loadNextDrillItem() {
@@ -677,6 +716,7 @@
           })
         });
         showTabDirect('deepdive');
+        checkLlmStatus();
         
         const qTitle = currentDrillItem ? (currentDrillItem.content.question_text || '') : '';
         document.getElementById('tutorSubheading').innerHTML = `Paused on <strong>${currentDrillItem ? currentDrillItem.item_id : 'current question'}</strong>: <em>${qTitle.slice(0, 90)}...</em>`;
@@ -810,6 +850,7 @@
 
     // Initialize on page load
     registerUser();
+    checkLlmStatus();
   </script>
 </body>
 </html>
