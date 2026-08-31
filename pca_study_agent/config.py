@@ -22,7 +22,7 @@ class Settings(BaseModel):
 
     # Gemini model configurations
     gemini_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY"))
-    gemini_flash_model: str = Field(default_factory=lambda: os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash"))
+    gemini_flash_model: str = Field(default_factory=lambda: os.getenv("GEMINI_FLASH_MODEL", "gemini-3.7-flash"))
     gemini_pro_model: str = Field(default_factory=lambda: os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro"))
 
     # Google Cloud settings
