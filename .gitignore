@@ -13,6 +13,8 @@ venv/
 
 # Environment and secrets
 .env
+.env.*
+!.env.template
 *.pem
 *.key
 
