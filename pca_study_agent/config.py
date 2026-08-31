@@ -1,7 +1,7 @@
 """Configuration and Secure Secret Management for PCA Study Agent.
 
 Ensures zero hardcoded credentials and supports secure injection via
-Google Cloud Secret Manager or runtime environment variables.
+Google Cloud Secret Manager, runtime environment variables, or .env files.
 """
 
 from __future__ import annotations
@@ -10,6 +10,32 @@ import os
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, Field
+
+
+def _load_env_file() -> None:
+    """Load .env file into os.environ (using python-dotenv or fallback parser)."""
+    try:
+        from dotenv import load_dotenv  # type: ignore
+        load_dotenv()
+    except Exception:
+        # Built-in lightweight fallback parser
+        for candidate_path in [Path(".env"), Path.home() / ".env"]:
+            if candidate_path.exists():
+                try:
+                    for line in candidate_path.read_text().splitlines():
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            key = k.strip()
+                            val = v.strip().strip("'\"")
+                            if key and key not in os.environ:
+                                os.environ[key] = val
+                except Exception:
+                    pass
+
+
+# Trigger environment file load
+_load_env_file()
 
 
 class Settings(BaseModel):
@@ -21,13 +47,18 @@ class Settings(BaseModel):
     environment: str = Field(default_factory=lambda: os.getenv("ENVIRONMENT", "development"))
 
     # Gemini model configurations
-    gemini_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY"))
+    gemini_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    )
     gemini_flash_model: str = Field(default_factory=lambda: os.getenv("GEMINI_FLASH_MODEL", "gemini-3.7-flash"))
     gemini_pro_model: str = Field(default_factory=lambda: os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro"))
 
     # Google Cloud settings
     google_cloud_project: Optional[str] = Field(default_factory=lambda: os.getenv("GOOGLE_CLOUD_PROJECT"))
     google_cloud_location: str = Field(default_factory=lambda: os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"))
+    use_vertex_ai: bool = Field(
+        default_factory=lambda: os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() in ("true", "1", "yes")
+    )
     use_gcp_secret_manager: bool = Field(
         default_factory=lambda: os.getenv("USE_GCP_SECRET_MANAGER", "false").lower() in ("true", "1", "yes")
     )
@@ -68,7 +99,7 @@ class Settings(BaseModel):
                 secret_payload = response.payload.data.decode("UTF-8").strip()
                 if secret_payload:
                     self.gemini_api_key = secret_payload
-            except Exception as e:
+            except Exception:
                 # Fall back to environment variable if Secret Manager lookup fails
                 pass
 

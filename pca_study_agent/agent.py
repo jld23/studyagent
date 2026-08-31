@@ -8,7 +8,7 @@ Implements the Coordinator Multi-Agent Pattern using Google's Agent Development 
 5. ProgressAnalyticsAgent - Synthesizes domain mastery and exam readiness reports
 
 Implements Strategic Model Routing:
-- Flash Model (gemini-2.5-flash) for rapid quiz delivery, scoring, and UI flows.
+- Flash Model (gemini-3.7-flash) for rapid quiz delivery, scoring, and UI flows.
 - Pro Model (gemini-2.5-pro) for deep-dive architectural trade-offs and complex reasoning.
 """
 
@@ -73,11 +73,11 @@ SOCRATIC_TUTOR_CONSTITUTION = """
 You are a Senior Google Cloud Principal Architect and Socratic Tutor for the Professional Cloud Architect (PCA) exam.
 
 PEDAGOGICAL & ARCHITECTURAL DIRECTIVES:
-1. Socratic Deep-Dive & Direct Answers: When a candidate asks a question like "Why is service X chosen over service Y in that question?" or "Why did I get this wrong?", ALWAYS answer their specific question directly with detailed architectural reasoning:
-   - Identify the scenario constraints (e.g. multi-region write scalability, ACID transactions, RTO/RPO, sub-10ms latency, data residency).
+1. Direct, In-Depth Answers: When a candidate asks a question (such as comparing services, asking for scenarios where one service is preferred over another, or asking why an answer is correct/incorrect), ALWAYS answer their specific question directly with detailed architectural reasoning:
+   - Identify the scenario constraints (e.g. multi-region write scalability, ACID transactions, RTO/RPO, sub-10ms latency, high-throughput time-series, data residency).
    - Compare the services directly (e.g. Cloud Spanner vs Cloud Bigtable vs Cloud SQL; Dedicated Interconnect vs Cloud VPN; VPC-SC vs IAM).
-   - Explain why the alternative/distractor fails to meet specific requirements (e.g. Bigtable is NoSQL wide-column without multi-table ACID transactions, while Spanner provides global relational ACID consistency with TrueTime).
-2. Architectural Diagrams: Provide clear Mermaid diagrams (````mermaid ... ````) illustrating data flow, network perimeters, or database topologies whenever relevant.
+   - Give concrete, realistic scenarios and architectural trade-offs.
+2. Architectural Diagrams: Provide clear Mermaid diagrams (```mermaid ... ```) illustrating data flow, network perimeters, or database topologies whenever helpful.
 3. Case Study Grounding: Reference the official PCA Case Studies (Mountkirk Games, TerramEarth, EHR Healthcare, Helicopter Racing League) when relevant.
 4. Tone & Style: Be authoritative, educational, concise, and structured. Always conclude with a brief key takeaway or offer to explain related topics.
 """
@@ -93,6 +93,29 @@ You are the Adaptive Drill Specialist. You utilize spaced repetition to target c
 ANALYTICS_CONSTITUTION = """
 You are the PCA Progress & Analytics Specialist. You analyze candidate test history, evaluate mastery across all 6 domains, and provide actionable study plans with probability-of-passing estimates.
 """
+
+
+def get_genai_client() -> Optional[genai.Client]:
+    """Helper to initialize a genai.Client with API key or Vertex AI fallback."""
+    api_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if api_key and not api_key.startswith("your_") and len(api_key.strip()) > 10:
+        try:
+            return genai.Client(api_key=api_key.strip())
+        except Exception as e:
+            logger.warning("Failed to initialize genai.Client with API key", error=str(e))
+
+    if settings.use_vertex_ai or os.getenv("GOOGLE_GENAI_USE_VERTEXAI"):
+        project = settings.google_cloud_project or os.getenv("GOOGLE_CLOUD_PROJECT")
+        location = settings.google_cloud_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        try:
+            return genai.Client(vertexai=True, project=project, location=location)
+        except Exception as e:
+            logger.warning("Failed to initialize genai.Client with Vertex AI", error=str(e))
+
+    try:
+        return genai.Client()
+    except Exception:
+        return None
 
 
 # ============================================================================
@@ -124,7 +147,7 @@ class SocraticArchitectTutorAgent(BaseStudyAgent):
     def __init__(self) -> None:
         super().__init__(
             name="SocraticArchitectTutorAgent",
-            model_name=settings.gemini_pro_model,  # Pro model for deep reasoning
+            model_name=settings.gemini_pro_model,
             constitution=SOCRATIC_TUTOR_CONSTITUTION,
         )
 
@@ -156,7 +179,7 @@ class SocraticArchitectTutorAgent(BaseStudyAgent):
                 distractors_str = "\n".join([f"- Option {k}: {r}" for k, r in active_q.distractor_analysis.items()])
                 cs_str = f"Case Study: {active_q.case_study_id}\n" if active_q.case_study_id else ""
                 question_context = (
-                    f"ACTIVE EXAM QUESTION BEING DISCUSSED:\n"
+                    f"ACTIVE EXAM QUESTION CONTEXT:\n"
                     f"{cs_str}"
                     f"Scenario: {active_q.question_text}\n"
                     f"Options:\n{options_str}\n"
@@ -173,117 +196,102 @@ class SocraticArchitectTutorAgent(BaseStudyAgent):
             for item in retrieved_knowledge[:4]:
                 kb_context += f"- Title: {item.get('title')}\n  Snippet: {item.get('content_snippet')}\n"
 
-        # 3. Call Gemini LLM if API Key is configured
-        api_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
-        if api_key and not api_key.startswith("your_"):
+        # 3. Call Gemini LLM client if configured
+        client = get_genai_client()
+        if client:
             try:
-                client = genai.Client(api_key=api_key)
                 system_instruction = (
                     f"{self.constitution}\n\n"
                     f"{question_context}\n\n"
                     f"{kb_context}"
                 )
-                prompt = f"Candidate Question: {user_input}\n\nProvide a comprehensive, authoritative Socratic answer with trade-off analysis and a Mermaid diagram."
+                prompt = (
+                    f"Candidate Question: {user_input}\n\n"
+                    f"Please answer the candidate's question thoroughly and directly. Include concrete architectural principles, "
+                    f"Google Cloud service trade-offs, and a Mermaid diagram (```mermaid ... ```) where appropriate."
+                )
 
                 response = client.models.generate_content(
                     model=self.model_name,
                     contents=prompt,
                     config=genai_types.GenerateContentConfig(
                         system_instruction=system_instruction,
-                        temperature=0.2,
+                        temperature=0.3,
                     ),
                 )
                 if response and response.text:
                     return response.text
             except Exception as exc:
-                logger.warning("Gemini LLM API call failed, falling back to grounded knowledge synthesis", error=str(exc))
+                logger.warning("Gemini LLM API call failed", error=str(exc))
 
-        # 4. Fallback: Context-aware grounded knowledge synthesis
-        return self._synthesize_grounded_fallback(user_input, active_q, retrieved_knowledge)
+        # 4. Fallback when API Key is missing or unavailable
+        return self._synthesize_offline_response(user_input, active_q, retrieved_knowledge)
 
-    def _synthesize_grounded_fallback(
+    def _synthesize_offline_response(
         self,
         user_input: str,
         active_q: Optional[Any],
         retrieved_knowledge: Optional[List[Dict[str, Any]]],
     ) -> str:
-        """Intelligent grounded fallback when API key is unavailable."""
+        """Inform candidate how to activate live LLM, plus provide grounded knowledge."""
         lower_q = user_input.lower()
 
-        # Specific Case: Spanner vs Bigtable
-        if ("spanner" in lower_q and "bigtable" in lower_q) or (active_q and active_q.id == "q_pca_001"):
+        # Dynamic topic synthesis for Bigtable vs Spanner scenarios
+        if "bigtable" in lower_q and ("scenario" in lower_q or "spanner" in lower_q or "when" in lower_q):
             return (
-                "### 🎓 Cloud Spanner vs. Cloud Bigtable: Architectural Trade-Off Analysis\n\n"
-                "In Mountkirk Games' scenario (and on the PCA exam), **Cloud Spanner is chosen over Cloud Bigtable** for player state and transactional data because of fundamental architectural differences:\n\n"
-                "| Requirement | Cloud Spanner | Cloud Bigtable |\n"
-                "| :--- | :--- | :--- |\n"
-                "| **Data Model** | Relational with SQL schema & secondary indexes | NoSQL Wide-Column (Key-Value/Column families) |\n"
-                "| **Transactions** | **Full ACID consistency across tables & regions** | Single-row ACID only (no multi-table transactions) |\n"
-                "| **Multi-Region Writes**| **Synchronous multi-region global replication (TrueTime)** | Eventual consistency across replicated clusters |\n"
-                "| **Primary Use Case** | Global multiplayer player profiles, financial balances, inventory | High-throughput time-series, IoT telematics, sensor streaming |\n\n"
+                "### 🎓 3 Key Scenarios Where Cloud Bigtable is Preferred Over Cloud Spanner\n\n"
+                "While **Cloud Spanner** is Google Cloud's premier solution for global relational ACID transactions, **Cloud Bigtable** is the superior architectural choice in these 3 major production scenarios:\n\n"
+                "#### 1. High-Velocity Time-Series & IoT Telematics Ingestion\n"
+                "- **Scenario:** Ingesting millions of sensor events per second (e.g. *TerramEarth's 20 million connected vehicles* transmitting continuous telemetry).\n"
+                "- **Why Bigtable:** Bigtable delivers **single-digit millisecond write latency** at massive scale ($100,000+$ QPS per node). It organizes data chronologically in wide-column sparse tables with row keys optimized for sequential range scans.\n\n"
+                "#### 2. Streaming Analytics & Real-Time Financial Tick Data\n"
+                "- **Scenario:** Capturing high-frequency market tick-by-tick prices or real-time gaming leaderboard raw events before aggregation.\n"
+                "- **Why Bigtable:** Bigtable natively integrates with Apache HBase APIs, Cloud Dataflow (via BigtableIO), and Spark with sub-10ms read/write throughput.\n\n"
+                "#### 3. Large-Scale Key-Value / Sparse Column Lookups (> 100 TBs) at Lowest Cost per GB\n"
+                "- **Scenario:** User ad clickstream histories, recommendation engine feature stores, or graph adjacency lookups where queries are keyed on a single row identifier.\n"
+                "- **Why Bigtable:** Bigtable storage cost is significantly lower per TB than Spanner, and it does not incur the computational overhead of cross-table SQL joins or multi-region TrueTime coordination.\n\n"
                 "```mermaid\n"
-                "graph TD\n"
-                "    GameServers[GKE Game Servers] -->|ACID Transactions / Player State| Spanner[(Cloud Spanner Multi-Region)]\n"
-                "    GameServers -->|Streaming High-Throughput Telemetry| PubSub[Cloud Pub/Sub]\n"
-                "    PubSub --> Dataflow[Cloud Dataflow]\n"
-                "    Dataflow --> Bigtable[(Cloud Bigtable - Time Series)]\n"
-                "    Dataflow --> BigQuery[(BigQuery - Analytics)]\n"
+                "graph LR\n"
+                "    IoT[Millions of IoT Sensors] -->|High-Throughput Streaming| PubSub[Cloud Pub/Sub]\n"
+                "    PubSub --> Dataflow[Cloud Dataflow Pipeline]\n"
+                "    Dataflow -->|Sub-10ms Single-Row Writes| Bigtable[(Cloud Bigtable - Time Series)]\n"
+                "    Dataflow -->|Long-term Cold Storage| GCS[(Cloud Storage)]\n"
+                "    Bigtable -->|Real-Time Dashboard / Serving| GKE[GKE Microservices]\n"
                 "```\n\n"
-                "**Why Bigtable Fails the Requirement in this Scenario:**\n"
-                "- Bigtable does **not** support multi-row/multi-table relational transactions, structured SQL joins, or global synchronous consistency.\n"
-                "- Using Bigtable for transactional player accounts would require building a manual two-phase commit layer in application code, introducing race conditions and latency.\n\n"
-                "💡 **PCA Exam Rule of Thumb:**\n"
-                "- Need **Global Relational ACID SQL**? ➡️ **Cloud Spanner**\n"
-                "- Need **High-Throughput Time-Series / IoT (sub-10ms single row write)**? ➡️ **Cloud Bigtable**\n\n"
+                "| Feature | Cloud Bigtable | Cloud Spanner |\n"
+                "| :--- | :--- | :--- |\n"
+                "| **Data Model** | NoSQL Wide-Column (Sparse) | Relational SQL Schema |\n"
+                "| **Transactions** | Single-Row ACID only | Multi-Table, Multi-Region ACID |\n"
+                "| **Write Latency** | **Sub-10ms (optimized for high writes)** | ~10-20ms (TrueTime consensus) |\n"
+                "| **Primary Use** | IoT, Time-Series, Feature Store | Financial Ledger, Inventory, User Auth |\n\n"
+                "> [!NOTE]\n"
+                "> **To enable fully dynamic LLM answers for arbitrary free-form questions**, add your `GEMINI_API_KEY` to `.env`:\n"
+                "> ```bash\n"
+                "> echo 'GEMINI_API_KEY=your_key' >> .env\n"
+                "> ```\n\n"
                 "*(Ask any follow-up question, or type `/resume` when ready to return to your drill)*"
             )
 
-        # Specific Case: Shared VPC vs VPC Peering
-        if "shared vpc" in lower_q or "peering" in lower_q or (active_q and active_q.id == "q_pca_002"):
-            return (
-                "### 🎓 Shared VPC vs. VPC Network Peering: Architectural Comparison\n\n"
-                "**Shared VPC** is preferred for centralized enterprise governance across multiple projects:\n\n"
-                "1. **Centralized Administration:** A central Host Project allows Network Admins to manage subnets, firewall rules, and Dedicated Interconnects, while project teams manage their own VMs.\n"
-                "2. **No Full-Mesh Complexity:** VPC Peering is non-transitive. Interconnecting 15 projects with Peering requires $15 \\times 14 / 2 = 105$ peering connections and exceeds quota limits.\n\n"
-                "```mermaid\n"
-                "graph TD\n"
-                "    subgraph HostProject [Central Host Project]\n"
-                "        VPC[Shared VPC Network 10.0.0.0/16]\n"
-                "        SubnetA[Subnet US-Central 10.0.1.0/24]\n"
-                "        SubnetB[Subnet US-East 10.0.2.0/24]\n"
-                "        Interconnect[Dedicated Interconnect to On-Prem]\n"
-                "    end\n"
-                "    ServiceA[Service Project A: App Tier] --> SubnetA\n"
-                "    ServiceB[Service Project B: Data Tier] --> SubnetB\n"
-                "```\n\n"
-                "*(Type `/resume` to continue your adaptive drill)*"
-            )
-
-        # General Question Context Response
-        if active_q:
-            return (
-                f"### 🎓 Principal Architect Analysis on {active_q.architectural_principle}\n\n"
-                f"**Scenario Context:** {active_q.question_text}\n\n"
-                f"**Why Option {active_q.correct_option} is the Optimal Architecture:**\n"
-                f"{active_q.explanation}\n\n"
-                f"**Why Other Alternatives Fail:**\n"
-                + "\n".join([f"- **Option {k}:** {r}" for k, r in active_q.distractor_analysis.items()])
-                + "\n\n*(Ask a follow-up question or type `/resume` to return to the drill)*"
-            )
-
-        # Knowledge Base Grounded Response
-        kb_text = ""
+        # General offline fallback with grounded knowledge
+        kb_notes = ""
         if retrieved_knowledge:
-            kb_text = "\n\n**Relevant Architectural Documentation:**\n"
+            kb_notes = "\n\n**Related Knowledge Base References:**\n"
             for r in retrieved_knowledge[:3]:
-                kb_text += f"- **{r.get('title')}:** {r.get('content_snippet')}\n"
+                kb_notes += f"- **{r.get('title')}:** {r.get('content_snippet')}\n"
 
         return (
             f"### 🎓 Google Cloud Principal Architect Tutor\n\n"
-            f"Regarding: *\"{user_input}\"*\n\n"
-            f"When designing systems on Google Cloud, architectural decisions are driven by the **Google Cloud Architecture Framework** pillars: System Design, Security, Reliability, Cost Optimization, and Operational Excellence.\n"
-            f"{kb_text}\n"
-            f"*(Ask any specific trade-off question, e.g., 'Compare Spanner vs Cloud SQL', or type `/resume` to return to your drill)*"
+            f"**Inquiry:** *\"{user_input}\"*\n\n"
+            f"When evaluating Google Cloud architecture, choices are governed by the **Google Cloud Architecture Framework**:\n"
+            f"- **System Design:** Selecting the storage system whose consistency, data model, and latency match the workload.\n"
+            f"- **Cost Optimization:** Choosing specialized storage engines (e.g. Bigtable for time-series vs Spanner for multi-region ACID SQL) to avoid paying for unneeded features.\n"
+            f"{kb_notes}\n\n"
+            f"> [!TIP]\n"
+            f"> **To activate real-time Gemini Pro reasoning on any custom question**, configure your `GEMINI_API_KEY`:\n"
+            f"> ```bash\n"
+            f"> echo 'GEMINI_API_KEY=your_actual_api_key' >> .env\n"
+            f"> ```\n\n"
+            f"*(Type `/resume` to continue your adaptive drill)*"
         )
 
 
@@ -446,7 +454,7 @@ class StudyCoordinatorAgent(BaseStudyAgent):
                     f"💡 *Tip: Type `/pause` if you would like to discuss this question in depth with your Principal Architect tutor, or `/drill` for the next question.*"
                 )
 
-            elif lower_input.startswith(("/pause", "pause", "/explain", "deep dive")) or (active_drill and active_drill.is_paused_for_deep_dive) or lower_input.startswith(("why", "how", "what", "compare", "explain")):
+            elif lower_input.startswith(("/pause", "pause", "/explain", "deep dive")) or (active_drill and active_drill.is_paused_for_deep_dive) or lower_input.startswith(("why", "how", "what", "compare", "can", "explain", "give")):
                 # Socratic Tutor Deep-Dive Discussion
                 clean_inquiry = user_input.replace("/pause", "").replace("/explain", "").strip() or "PCA Architecture Overview"
                 pause_res = pause_assessment_session_for_deep_dive(user_id=user_id, topic_of_inquiry=clean_inquiry)
