@@ -1,0 +1,56 @@
+[
+  {
+    "eval_id": "eval_001",
+    "domain_id": "domain_1",
+    "topic": "Global Multi-Region Relational ACID Database",
+    "scenario": "Mountkirk Games needs a globally distributed relational database with multi-region synchronous writes and ACID consistency for player state.",
+    "expected_service": "Cloud Spanner",
+    "disallowed_services": ["Cloud SQL", "Cloud Bigtable"],
+    "criteria": "Must recommend Cloud Spanner due to global synchronous multi-region ACID write transactions."
+  },
+  {
+    "eval_id": "eval_002",
+    "domain_id": "domain_2",
+    "topic": "Centralized Network Administration",
+    "scenario": "An enterprise with 15 projects requires a single private corporate IP address space, centralized firewall rules, and hybrid on-prem connectivity.",
+    "expected_service": "Shared VPC",
+    "disallowed_services": ["VPC Network Peering full mesh"],
+    "criteria": "Must recommend Shared VPC with a host project and service projects for centralized network governance."
+  },
+  {
+    "eval_id": "eval_003",
+    "domain_id": "domain_3",
+    "topic": "Data Exfiltration Prevention",
+    "scenario": "EHR Healthcare must prevent data exfiltration from Cloud Storage and BigQuery even if authorized user credentials are used outside trusted networks.",
+    "expected_service": "VPC Service Controls",
+    "disallowed_services": ["Cloud Armor", "CSEK"],
+    "criteria": "Must recommend VPC Service Controls security perimeters to isolate Google Cloud APIs from unauthorized network perimeters."
+  },
+  {
+    "eval_id": "eval_004",
+    "domain_id": "domain_4",
+    "topic": "Continuous Delivery on GKE",
+    "scenario": "Automate progressive canary deployments (10% traffic shifts) with built-in verification and automated rollbacks on GKE.",
+    "expected_service": "Cloud Deploy",
+    "disallowed_services": ["Cloud Build bash scripts"],
+    "criteria": "Must recommend Cloud Deploy for declarative multi-target delivery pipelines with canary support."
+  },
+  {
+    "eval_id": "eval_005",
+    "domain_id": "domain_5",
+    "topic": "High-Throughput Streaming Ingestion",
+    "scenario": "TerramEarth needs to ingest sensor metrics from 5 million cellular-connected machines buffering millions of events per second with autoscaling.",
+    "expected_service": "Cloud Pub/Sub + Cloud Dataflow",
+    "disallowed_services": ["Cloud SQL direct JDBC"],
+    "criteria": "Must recommend Pub/Sub streaming buffer decoupled with Cloud Dataflow stream processing."
+  },
+  {
+    "eval_id": "eval_006",
+    "domain_id": "domain_6",
+    "topic": "Distributed RPC Latency Profiling",
+    "scenario": "An application on Cloud Run experiences intermittent 504 gateway timeouts across microservices; engineers need to find the slowest RPC call.",
+    "expected_service": "Cloud Trace",
+    "disallowed_services": ["Error Reporting", "Cloud Monitoring CPU dashboard"],
+    "criteria": "Must recommend Cloud Trace for distributed latency tracing across microservices."
+  }
+]

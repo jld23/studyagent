@@ -1,0 +1,27 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Environment and secrets
+.env
+*.pem
+*.key
+
+# Runtime data and SQLite databases
+data/user_profiles/*.json
+data/study_materials/*.json
+!data/study_materials/sync_metadata.json
+
+# OS and IDE files
+.DS_Store
+.vscode/
+.idea/

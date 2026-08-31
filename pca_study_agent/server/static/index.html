@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google Cloud PCA Adaptive Study Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --google-blue: #1a73e8;
+      --google-blue-hover: #1557b0;
+      --google-red: #d93025;
+      --google-yellow: #f9ab00;
+      --google-green: #1e8e3e;
+      --surface-bg: #f8f9fa;
+      --card-bg: #ffffff;
+      --text-main: #202124;
+      --text-muted: #5f6368;
+      --border-color: #dadce0;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --shadow-sm: 0 1px 2px rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
+      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--surface-bg);
+      color: var(--text-main);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--border-color);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand svg { width: 32px; height: 32px; }
+    .brand-title {
+      font-family: 'Google Sans', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #202124;
+    }
+    .brand-badge {
+      font-size: 0.75rem;
+      background: #e8f0fe;
+      color: var(--google-blue);
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #f1f3f4;
+      padding: 6px 14px;
+      border-radius: 24px;
+      font-size: 0.875rem;
+    }
+    .user-pill strong { color: var(--google-blue); }
+
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      background: #ffffff;
+      padding: 8px 24px;
+      border-bottom: 1px solid var(--border-color);
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover { background: #f1f3f4; color: var(--text-main); }
+    .tab-btn.active {
+      background: #e8f0fe;
+      color: var(--google-blue);
+      font-weight: 600;
+    }
+
+    main {
+      flex: 1;
+      max-width: 1100px;
+      width: 100%;
+      margin: 20px auto;
+      padding: 0 16px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+
+    h2, h3 { font-family: 'Google Sans', sans-serif; font-weight: 600; margin-bottom: 12px; }
+
+    /* Button Styles */
+    .btn {
+      padding: 10px 20px;
+      border-radius: var(--radius-sm);
+      font-family: 'Google Sans', sans-serif;
+      font-weight: 500;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.2s, box-shadow 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-primary { background: var(--google-blue); color: white; }
+    .btn-primary:hover { background: var(--google-blue-hover); }
+    .btn-outline { background: white; border-color: var(--border-color); color: var(--text-main); }
+    .btn-outline:hover { background: #f8f9fa; }
+    .btn-warning { background: var(--google-yellow); color: #202124; }
+    .btn-success { background: var(--google-green); color: white; }
+
+    /* Question & Option Styles */
+    .scenario-box {
+      font-size: 1.05rem;
+      line-height: 1.6;
+      margin-bottom: 20px;
+      background: #f8f9fa;
+      padding: 16px;
+      border-radius: var(--radius-sm);
+      border-left: 4px solid var(--google-blue);
+    }
+    .case-study-tag {
+      display: inline-block;
+      background: #fef7e0;
+      color: #b06000;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .options-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .option-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 14px 16px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      background: white;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .option-item:hover { border-color: var(--google-blue); background: #f8faff; }
+    .option-item.selected { border-color: var(--google-blue); background: #e8f0fe; font-weight: 500; }
+    .option-item.correct { border-color: var(--google-green); background: #e6f4ea; }
+    .option-item.incorrect { border-color: var(--google-red); background: #fce8e6; }
+    .option-key {
+      font-weight: 700;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #e8eaed;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      flex-shrink: 0;
+    }
+    .option-item.selected .option-key { background: var(--google-blue); color: white; }
+    .option-item.correct .option-key { background: var(--google-green); color: white; }
+    .option-item.incorrect .option-key { background: var(--google-red); color: white; }
+
+    /* Feedback Banner */
+    .feedback-box {
+      margin-top: 16px;
+      padding: 16px;
+      border-radius: var(--radius-sm);
+      background: #f1f3f4;
+      display: none;
+    }
+    .feedback-box.show { display: block; }
+    .feedback-box.correct { background: #e6f4ea; border-left: 4px solid var(--google-green); }
+    .feedback-box.incorrect { background: #fce8e6; border-left: 4px solid var(--google-red); }
+
+    /* Progress Matrix */
+    .domain-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid #f1f3f4;
+    }
+    .progress-bar-bg {
+      flex: 1;
+      height: 10px;
+      background: #e8eaed;
+      border-radius: 5px;
+      margin: 0 16px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--google-blue);
+      border-radius: 5px;
+      transition: width 0.4s ease;
+    }
+
+    /* Deep-Dive Discussion Box */
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      height: 500px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: #fafafa;
+    }
+    .chat-messages {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .chat-bubble {
+      max-width: 80%;
+      padding: 12px 16px;
+      border-radius: var(--radius-md);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    .chat-bubble.user {
+      align-self: flex-end;
+      background: #e8f0fe;
+      color: var(--google-blue);
+      border-bottom-right-radius: 2px;
+    }
+    .chat-bubble.agent {
+      align-self: flex-start;
+      background: white;
+      border: 1px solid var(--border-color);
+      border-bottom-left-radius: 2px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .chat-input-bar {
+      display: flex;
+      padding: 12px;
+      background: white;
+      border-top: 1px solid var(--border-color);
+      gap: 8px;
+    }
+    .chat-input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid var(--border-color);
+      border-radius: 24px;
+      outline: none;
+      font-size: 0.95rem;
+    }
+    .chat-input:focus { border-color: var(--google-blue); }
+
+    .tag-badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #e8eaed;
+      color: #3c4043;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 24 24">
+        <path fill="#4285F4" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95C8.08 7.14 9.94 6 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11c1.56.1 2.78 1.41 2.78 2.96 0 1.65-1.35 3-3 3z"/>
+      </svg>
+      <div>
+        <div class="brand-title">Google Cloud PCA Study Agent</div>
+      </div>
+      <span class="brand-badge">ADK Multi-Agent</span>
+    </div>
+
+    <div class="user-pill">
+      <span>Candidate: <strong id="userNameDisplay">Alex</strong></span>
+      <button class="btn btn-outline" style="padding: 4px 10px; font-size: 0.75rem;" onclick="switchUserPrompt()">Switch</button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <div class="nav-tabs">
+    <button class="tab-btn active" onclick="showTab('drill')">⚡ Continuous Drill</button>
+    <button class="tab-btn" onclick="showTab('diagnostic')">🎯 Diagnostic Assessment</button>
+    <button class="tab-btn" onclick="showTab('deepdive')">🎓 Socratic Architect Tutor ("Pause & Learn")</button>
+    <button class="tab-btn" onclick="showTab('progress')">📊 6-Domain Readiness Report</button>
+    <button class="tab-btn" onclick="showTab('materials')">📚 Study Materials & Sync</button>
+  </div>
+
+  <!-- Main Content Container -->
+  <main>
+
+    <!-- 1. Drill View (Continuous Spaced Repetition Drill) -->
+    <section id="drillTab" class="tab-content">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <div>
+            <span class="tag-badge" id="drillDomainBadge" style="background:#e8f0fe; color:#1a73e8;">Domain 1</span>
+            <span class="tag-badge" id="drillBoxBadge" style="background:#fef7e0; color:#b06000;">Leitner Box 1</span>
+            <span class="tag-badge" id="drillDifficultyBadge">Intermediate</span>
+          </div>
+          <button class="btn btn-warning" onclick="pauseForDeepDive()">⏸️ Pause & Discuss with Architect</button>
+        </div>
+
+        <div id="drillCaseStudyBadge" class="case-study-tag" style="display:none;">Case Study</div>
+        <div class="scenario-box" id="drillQuestionText">Loading adaptive question...</div>
+
+        <div class="options-list" id="drillOptionsList"></div>
+
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <button class="btn btn-primary" id="drillSubmitBtn" onclick="submitCurrentAnswer()" disabled>Submit Answer</button>
+          <button class="btn btn-outline" id="drillNextBtn" onclick="loadNextDrillItem()" style="display:none;">Next Question ➡️</button>
+        </div>
+
+        <div id="drillFeedback" class="feedback-box">
+          <h4 id="feedbackTitle" style="margin-bottom: 8px;"></h4>
+          <p id="feedbackPrinciple" style="font-weight: 500; margin-bottom: 6px;"></p>
+          <p id="feedbackExplanation" style="margin-bottom: 12px;"></p>
+          <div id="distractorList" style="font-size: 0.875rem; color: #5f6368;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Diagnostic Assessment View -->
+    <section id="diagnosticTab" class="tab-content" style="display:none;">
+      <div class="card">
+        <h2>🎯 Baseline Diagnostic Assessment</h2>
+        <p style="color: var(--text-muted); margin-bottom: 20px;">
+          Complete this 6-domain baseline assessment to evaluate your starting knowledge and personalize your spaced repetition drill plan.
+        </p>
+        <button class="btn btn-primary" onclick="startDiagnostic()">Start 6-Domain Diagnostic</button>
+
+        <div id="diagnosticContainer" style="margin-top: 24px; display:none;">
+          <div id="diagnosticQuestionBox"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Socratic Architect Tutor Deep-Dive View -->
+    <section id="deepdiveTab" class="tab-content" style="display:none;">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <div>
+            <h2>🎓 Senior Google Cloud Principal Architect Tutor</h2>
+            <p style="color: var(--text-muted); font-size: 0.875rem;">
+              Deep-dive architectural discussions, trade-off comparisons, distractor deconstruction, and Mermaid diagrams.
+            </p>
+          </div>
+          <button class="btn btn-success" onclick="resumeDrill()">▶️ Resume Drill</button>
+        </div>
+
+        <div class="chat-container">
+          <div class="chat-messages" id="chatMessages">
+            <div class="chat-bubble agent">
+              <strong>Principal Architect:</strong> Welcome to Socratic deep-dive mode! Ask any architectural question, compare services (e.g. <em>"Why Cloud Spanner over Cloud SQL HA?"</em> or <em>"Explain VPC-SC in EHR Healthcare"</em>), or ask why a particular option is optimal.
+            </div>
+          </div>
+          <div class="chat-input-bar">
+            <input type="text" class="chat-input" id="chatInput" placeholder="Ask your Principal Architect tutor a question..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+            <button class="btn btn-primary" onclick="sendChatMessage()">Send</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Progress & Readiness Report View -->
+    <section id="progressTab" class="tab-content" style="display:none;">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <h2>📊 Certification Readiness Report</h2>
+          <button class="btn btn-outline" onclick="loadProgressReport()">🔄 Refresh</button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
+          <div style="background: #e8f0fe; padding: 16px; border-radius: var(--radius-sm); text-align: center;">
+            <div style="font-size: 0.8rem; color: #1a73e8; font-weight: 600;">READINESS SCORE</div>
+            <div id="readinessScore" style="font-size: 2rem; font-weight: 700; color: #1a73e8;">50.0%</div>
+          </div>
+          <div style="background: #e6f4ea; padding: 16px; border-radius: var(--radius-sm); text-align: center;">
+            <div style="font-size: 0.8rem; color: #1e8e3e; font-weight: 600;">PASS PROBABILITY</div>
+            <div id="passProb" style="font-size: 1.1rem; font-weight: 700; color: #1e8e3e; margin-top: 6px;">Emerging</div>
+          </div>
+          <div style="background: #fef7e0; padding: 16px; border-radius: var(--radius-sm); text-align: center;">
+            <div style="font-size: 0.8rem; color: #b06000; font-weight: 600;">QUESTIONS ATTEMPTED</div>
+            <div id="questionsCount" style="font-size: 2rem; font-weight: 700; color: #b06000;">0</div>
+          </div>
+        </div>
+
+        <h3>Domain Mastery Breakdown</h3>
+        <div id="domainsMatrix">Loading...</div>
+      </div>
+    </section>
+
+    <!-- 5. Materials & Sync View -->
+    <section id="materialsTab" class="tab-content" style="display:none;">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <h2>📚 Study Materials & Official Syllabus Sync</h2>
+          <button class="btn btn-outline" onclick="triggerSync()">🔄 Run Weekly Sync Check</button>
+        </div>
+
+        <p style="color: var(--text-muted); margin-bottom: 20px;">
+          The agent is seeded with the official 6 Google Cloud PCA Domains and 4 Case Studies (*Mountkirk Games, TerramEarth, EHR Healthcare, Helicopter Racing League*). You can also ingest your own custom study notes and cheat sheets below.
+        </p>
+
+        <div style="background: #f8f9fa; padding: 16px; border-radius: var(--radius-sm); margin-bottom: 20px;">
+          <h3>Upload Custom Study Notes</h3>
+          <input type="text" id="noteTitle" class="chat-input" placeholder="Title (e.g. My GKE Autopilot vs Standard Cheat Sheet)" style="margin-bottom: 10px; width: 100%;">
+          <textarea id="noteContent" class="chat-input" rows="4" placeholder="Paste your study notes or architecture summary..." style="margin-bottom: 10px; width: 100%; border-radius: 8px; font-family: inherit;"></textarea>
+          <button class="btn btn-primary" onclick="uploadNote()">Ingest Study Note</button>
+        </div>
+
+        <div id="syncStatusBox" style="font-size: 0.875rem; color: var(--text-muted);"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+    let currentUserId = localStorage.getItem('pca_user_id') || 'alex_architect';
+    let currentUserName = localStorage.getItem('pca_user_name') || 'Alex';
+    let currentDrillItem = null;
+    let selectedOption = null;
+
+    document.getElementById('userNameDisplay').textContent = currentUserName;
+
+    function switchUserPrompt() {
+      const newId = prompt("Enter Candidate User ID:", currentUserId);
+      if (newId && newId.trim()) {
+        currentUserId = newId.trim();
+        const newName = prompt("Enter Candidate Name:", currentUserName) || currentUserId;
+        currentUserName = newName.trim();
+        localStorage.setItem('pca_user_id', currentUserId);
+        localStorage.setItem('pca_user_name', currentUserName);
+        document.getElementById('userNameDisplay').textContent = currentUserName;
+        registerUser();
+      }
+    }
+
+    async function registerUser() {
+      try {
+        await fetch('/api/v1/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUserId, candidate_name: currentUserName })
+        });
+        loadNextDrillItem();
+      } catch (err) {
+        console.error("Auth failed:", err);
+      }
+    }
+
+    function showTab(tabName) {
+      document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+
+      document.getElementById(tabName + 'Tab').style.display = 'block';
+      event.currentTarget.classList.add('active');
+
+      if (tabName === 'progress') loadProgressReport();
+    }
+
+    async function loadNextDrillItem() {
+      const feedback = document.getElementById('drillFeedback');
+      feedback.className = 'feedback-box';
+      feedback.style.display = 'none';
+      document.getElementById('drillNextBtn').style.display = 'none';
+      document.getElementById('drillSubmitBtn').style.display = 'inline-flex';
+      document.getElementById('drillSubmitBtn').disabled = true;
+      selectedOption = null;
+
+      try {
+        const res = await fetch(`/api/v1/drill/next?user_id=${currentUserId}&item_type=question`);
+        const data = await res.json();
+        currentDrillItem = data;
+
+        document.getElementById('drillDomainBadge').textContent = data.domain_title || data.domain_id;
+        document.getElementById('drillBoxBadge').textContent = `Leitner Box ${data.leitner_box || 1}`;
+        document.getElementById('drillDifficultyBadge').textContent = data.difficulty ? data.difficulty.toUpperCase() : 'INTERMEDIATE';
+
+        const csBadge = document.getElementById('drillCaseStudyBadge');
+        if (data.content && data.content.case_study_id) {
+          csBadge.style.display = 'inline-block';
+          csBadge.textContent = 'Case Study: ' + data.content.case_study_id.replace('_', ' ');
+        } else {
+          csBadge.style.display = 'none';
+        }
+
+        document.getElementById('drillQuestionText').textContent = data.content.question_text || data.content.prompt;
+
+        const optionsList = document.getElementById('drillOptionsList');
+        optionsList.innerHTML = '';
+
+        if (data.content.options) {
+          data.content.options.forEach(opt => {
+            const item = document.createElement('div');
+            item.className = 'option-item';
+            item.innerHTML = `<span class="option-key">${opt.key}</span><div>${opt.text}</div>`;
+            item.onclick = () => selectOption(opt.key, item);
+            optionsList.appendChild(item);
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load drill item:", err);
+      }
+    }
+
+    function selectOption(key, el) {
+      selectedOption = key;
+      document.querySelectorAll('.option-item').forEach(item => item.classList.remove('selected'));
+      el.classList.add('selected');
+      document.getElementById('drillSubmitBtn').disabled = false;
+    }
+
+    async function submitCurrentAnswer() {
+      if (!selectedOption || !currentDrillItem) return;
+
+      try {
+        const res = await fetch('/api/v1/drill/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            item_id: currentDrillItem.item_id,
+            submitted_answer: selectedOption
+          })
+        });
+        const result = await res.json();
+
+        // Highlight options
+        document.querySelectorAll('.option-item').forEach(item => {
+          const key = item.querySelector('.option-key').textContent;
+          if (key === result.correct_answer) {
+            item.classList.add('correct');
+          } else if (key === selectedOption && !result.is_correct) {
+            item.classList.add('incorrect');
+          }
+        });
+
+        // Show feedback
+        const fb = document.getElementById('drillFeedback');
+        fb.className = `feedback-box show ${result.is_correct ? 'correct' : 'incorrect'}`;
+        document.getElementById('feedbackTitle').textContent = result.is_correct ? '✅ Correct Choice!' : '❌ Suboptimal Choice';
+        document.getElementById('feedbackPrinciple').textContent = 'Architectural Principle: ' + result.architectural_principle;
+        document.getElementById('feedbackExplanation').textContent = result.explanation;
+
+        const distList = document.getElementById('distractorList');
+        distList.innerHTML = '';
+        if (result.distractor_analysis) {
+          for (const [k, reason] of Object.entries(result.distractor_analysis)) {
+            distList.innerHTML += `<div><strong>Option ${k}:</strong> ${reason}</div>`;
+          }
+        }
+
+        document.getElementById('drillSubmitBtn').style.display = 'none';
+        document.getElementById('drillNextBtn').style.display = 'inline-flex';
+      } catch (err) {
+        console.error("Failed to submit answer:", err);
+      }
+    }
+
+    async function pauseForDeepDive() {
+      try {
+        await fetch('/api/v1/drill/pause', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            topic_of_inquiry: currentDrillItem ? currentDrillItem.content.question_text : "PCA Architecture"
+          })
+        });
+        showTabDirect('deepdive');
+        appendChatMessage("agent", `Paused the active drill on question *${currentDrillItem ? currentDrillItem.item_id : ''}*. What aspect of this Google Cloud architecture would you like to explore?`);
+      } catch (err) {
+        console.error("Pause failed:", err);
+      }
+    }
+
+    async function resumeDrill() {
+      try {
+        await fetch('/api/v1/drill/resume', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUserId })
+        });
+        showTabDirect('drill');
+      } catch (err) {
+        console.error("Resume failed:", err);
+      }
+    }
+
+    function showTabDirect(tabName) {
+      document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.getElementById(tabName + 'Tab').style.display = 'block';
+    }
+
+    async function sendChatMessage() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text) return;
+
+      appendChatMessage("user", text);
+      input.value = '';
+
+      try {
+        const res = await fetch('/api/v1/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUserId, message: text })
+        });
+        const data = await res.json();
+        appendChatMessage("agent", data.response_text);
+      } catch (err) {
+        appendChatMessage("agent", "Error communicating with the study agent: " + err);
+      }
+    }
+
+    function appendChatMessage(role, text) {
+      const container = document.getElementById('chatMessages');
+      const bubble = document.createElement('div');
+      bubble.className = `chat-bubble ${role}`;
+      bubble.innerHTML = marked.parse(text);
+      container.appendChild(bubble);
+      container.scrollTop = container.scrollHeight;
+      mermaid.run({ nodes: bubble.querySelectorAll('.language-mermaid, .mermaid') });
+    }
+
+    async function loadProgressReport() {
+      try {
+        const res = await fetch(`/api/v1/progress/report?user_id=${currentUserId}`);
+        const rep = await res.json();
+
+        document.getElementById('readinessScore').textContent = rep.overall_readiness_score + '%';
+        document.getElementById('passProb').textContent = rep.estimated_pass_probability;
+        document.getElementById('questionsCount').textContent = rep.total_questions_attempted;
+
+        const matrix = document.getElementById('domainsMatrix');
+        matrix.innerHTML = '';
+
+        rep.domain_breakdown.forEach(dom => {
+          matrix.innerHTML += `
+            <div class="domain-row">
+              <div style="width: 250px;">
+                <strong>Domain ${dom.domain_number}</strong>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">${dom.domain_title} (${dom.exam_weight})</div>
+              </div>
+              <div class="progress-bar-bg">
+                <div class="progress-bar-fill" style="width: ${dom.mastery_percentage}%"></div>
+              </div>
+              <div style="width: 80px; text-align: right; font-weight: 600;">
+                ${dom.mastery_percentage}%
+              </div>
+            </div>
+          `;
+        });
+      } catch (err) {
+        console.error("Progress report error:", err);
+      }
+    }
+
+    async function uploadNote() {
+      const title = document.getElementById('noteTitle').value.trim();
+      const content = document.getElementById('noteContent').value.trim();
+      if (!title || !content) return alert("Please provide both title and note content.");
+
+      try {
+        const res = await fetch('/api/v1/materials/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUserId, title, content })
+        });
+        const data = await res.json();
+        alert(data.message);
+        document.getElementById('noteTitle').value = '';
+        document.getElementById('noteContent').value = '';
+      } catch (err) {
+        alert("Upload error: " + err);
+      }
+    }
+
+    async function triggerSync() {
+      try {
+        const res = await fetch('/api/v1/materials/sync', { method: 'POST' });
+        const data = await res.json();
+        document.getElementById('syncStatusBox').innerHTML = `
+          <strong>Sync Version:</strong> ${data.sync_version} | <strong>Last Synced:</strong> ${data.last_synced_at}<br>
+          ${data.message}
+        `;
+      } catch (err) {
+        alert("Sync error: " + err);
+      }
+    }
+
+    // Initialize on page load
+    registerUser();
+  </script>
+</body>
+</html>
